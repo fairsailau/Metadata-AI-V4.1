@@ -1,8 +1,12 @@
 import streamlit as st
-import logging
 import time
+import logging
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from typing import List, Dict, Any
+import json
 import concurrent.futures
-from typing import Dict, Any, List, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -14,240 +18,346 @@ DEBUG_MODE = True
 
 def process_files():
     """
-    Process files with metadata extraction
+    Process files for metadata extraction with Streamlit-compatible processing
     """
     st.title("Process Files")
     
-    if not st.session_state.authenticated or not st.session_state.client:
-        st.error("Please authenticate with Box first")
-        return
+    # Add debug information
+    if "debug_info" not in st.session_state:
+        st.session_state.debug_info = []
     
-    if not st.session_state.selected_files:
-        st.warning("No files selected. Please select files in the File Browser first.")
-        if st.button("Go to File Browser", key="go_to_file_browser_button_process"):
-            st.session_state.current_page = "File Browser"
-            st.rerun()
-        return
+    # Add metadata templates
+    if "metadata_templates" not in st.session_state:
+        st.session_state.metadata_templates = {}
     
-    # Display processing parameters
-    st.write(f"Ready to process {len(st.session_state.selected_files)} files using the configured metadata extraction parameters.")
+    # Add feedback data
+    if "feedback_data" not in st.session_state:
+        st.session_state.feedback_data = {}
     
-    # Batch processing controls
-    with st.expander("Batch Processing Controls", expanded=True):
+    # Initialize extraction results if not exists
+    if "extraction_results" not in st.session_state:
+        st.session_state.extraction_results = {}
+    
+    try:
+        if not st.session_state.authenticated or not st.session_state.client:
+            st.error("Please authenticate with Box first")
+            return
+        
+        if not st.session_state.selected_files:
+            st.warning("No files selected. Please select files in the File Browser first.")
+            if st.button("Go to File Browser", key="go_to_file_browser_button"):
+                st.session_state.current_page = "File Browser"
+                st.rerun()
+            return
+        
+        if "metadata_config" not in st.session_state or (
+            st.session_state.metadata_config["extraction_method"] == "structured" and 
+            not st.session_state.metadata_config["use_template"] and 
+            not st.session_state.metadata_config["custom_fields"]
+        ):
+            st.warning("Metadata configuration is incomplete. Please configure metadata extraction parameters.")
+            if st.button("Go to Metadata Configuration", key="go_to_metadata_config_button"):
+                st.session_state.current_page = "Metadata Configuration"
+                st.rerun()
+            return
+        
+        # Initialize processing state
+        if "processing_state" not in st.session_state:
+            st.session_state.processing_state = {
+                "is_processing": False,
+                "processed_files": 0,
+                "total_files": len(st.session_state.selected_files),
+                "current_file_index": -1,
+                "current_file": "",
+                "results": {},
+                "errors": {},
+                "retries": {},
+                "max_retries": 3,
+                "retry_delay": 2,  # seconds
+                "visualization_data": {}
+            }
+        
+        # Display processing information
+        st.write(f"Ready to process {len(st.session_state.selected_files)} files using the configured metadata extraction parameters.")
+        
+        # Enhanced batch processing controls
+        with st.expander("Batch Processing Controls"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Batch size control
+                batch_size = st.number_input(
+                    "Batch Size",
+                    min_value=1,
+                    max_value=50,
+                    value=st.session_state.metadata_config.get("batch_size", 5),
+                    key="batch_size_input"
+                )
+                st.session_state.metadata_config["batch_size"] = batch_size
+                
+                # Max retries control
+                max_retries = st.number_input(
+                    "Max Retries",
+                    min_value=0,
+                    max_value=10,
+                    value=st.session_state.processing_state.get("max_retries", 3),
+                    key="max_retries_input"
+                )
+                st.session_state.processing_state["max_retries"] = max_retries
+            
+            with col2:
+                # Retry delay control
+                retry_delay = st.number_input(
+                    "Retry Delay (seconds)",
+                    min_value=1,
+                    max_value=30,
+                    value=st.session_state.processing_state.get("retry_delay", 2),
+                    key="retry_delay_input"
+                )
+                st.session_state.processing_state["retry_delay"] = retry_delay
+                
+                # Processing mode
+                processing_mode = st.selectbox(
+                    "Processing Mode",
+                    options=["Sequential", "Parallel"],
+                    index=0,
+                    key="processing_mode_input"
+                )
+                st.session_state.processing_state["processing_mode"] = processing_mode
+        
+        # Template management
+        with st.expander("Metadata Template Management"):
+            st.write("#### Save Current Configuration as Template")
+            template_name = st.text_input("Template Name", key="template_name_input")
+            
+            if st.button("Save Template", key="save_template_button"):
+                if template_name:
+                    st.session_state.metadata_templates[template_name] = st.session_state.metadata_config.copy()
+                    st.success(f"Template '{template_name}' saved successfully!")
+                else:
+                    st.warning("Please enter a template name")
+            
+            st.write("#### Load Template")
+            if st.session_state.metadata_templates:
+                template_options = list(st.session_state.metadata_templates.keys())
+                selected_template = st.selectbox(
+                    "Select Template",
+                    options=template_options,
+                    key="load_template_select"
+                )
+                
+                if st.button("Load Template", key="load_template_button"):
+                    st.session_state.metadata_config = st.session_state.metadata_templates[selected_template].copy()
+                    st.success(f"Template '{selected_template}' loaded successfully!")
+            else:
+                st.info("No saved templates yet")
+        
+        # Display configuration summary
+        with st.expander("Configuration Summary"):
+            st.write("#### Extraction Method")
+            st.write(f"Method: {st.session_state.metadata_config['extraction_method'].capitalize()}")
+            
+            if st.session_state.metadata_config["extraction_method"] == "structured":
+                if st.session_state.metadata_config["use_template"]:
+                    st.write(f"Using template: Template ID {st.session_state.metadata_config['template_id']}")
+                else:
+                    st.write(f"Using {len(st.session_state.metadata_config['custom_fields'])} custom fields")
+                    for i, field in enumerate(st.session_state.metadata_config['custom_fields']):
+                        st.write(f"- {field.get('display_name', field.get('name', ''))} ({field.get('type', 'string')})")
+            else:
+                st.write("Freeform prompt:")
+                st.write(f"> {st.session_state.metadata_config['freeform_prompt']}")
+            
+            st.write(f"AI Model: {st.session_state.metadata_config['ai_model']}")
+            st.write(f"Batch Size: {st.session_state.metadata_config['batch_size']}")
+        
+        # Display selected files
+        with st.expander("Selected Files"):
+            for file in st.session_state.selected_files:
+                st.write(f"- {file['name']} (Type: {file['type']})")
+        
+        # Process files button
         col1, col2 = st.columns(2)
         
         with col1:
-            batch_size = st.number_input(
-                "Batch Size",
-                min_value=1,
-                max_value=10,
-                value=st.session_state.metadata_config["batch_size"],
-                step=1,
-                key="batch_size_input_process"
+            start_button = st.button(
+                "Start Processing",
+                disabled=st.session_state.processing_state["is_processing"],
+                use_container_width=True,
+                key="start_processing_button"
             )
-            
-            # Update batch size in session state
-            st.session_state.metadata_config["batch_size"] = batch_size
         
         with col2:
-            retry_delay = st.number_input(
-                "Retry Delay (seconds)",
-                min_value=1,
-                max_value=30,
-                value=st.session_state.processing_state.get("retry_delay", 2),
-                step=1,
-                key="retry_delay_input"
+            cancel_button = st.button(
+                "Cancel Processing",
+                disabled=not st.session_state.processing_state["is_processing"],
+                use_container_width=True,
+                key="cancel_processing_button"
             )
-            
-            # Update retry delay in session state
-            st.session_state.processing_state["retry_delay"] = retry_delay
         
-        max_retries = st.number_input(
-            "Max Retries",
-            min_value=0,
-            max_value=5,
-            value=st.session_state.processing_state.get("max_retries", 3),
-            step=1,
-            key="max_retries_input"
-        )
-        
-        # Update max retries in session state
-        st.session_state.processing_state["max_retries"] = max_retries
-        
-        # Processing mode
-        processing_mode = st.selectbox(
-            "Processing Mode",
-            options=["Sequential", "Parallel"],
-            index=0,
-            key="processing_mode_input"
-        )
-        
-        # Update processing mode in session state
-        st.session_state.processing_state["processing_mode"] = processing_mode
-    
-    # Metadata template management
-    with st.expander("Metadata Template Management", expanded=True):
-        st.subheader("Save Current Configuration as Template")
-        
-        template_name = st.text_input(
-            "Template Name",
-            key="template_name_input"
-        )
-        
-        if st.button("Save Template", key="save_template_button"):
-            if template_name:
-                # Save template
-                if "saved_templates" not in st.session_state:
-                    st.session_state.saved_templates = {}
-                
-                st.session_state.saved_templates[template_name] = {
-                    "extraction_method": st.session_state.metadata_config["extraction_method"],
-                    "freeform_prompt": st.session_state.metadata_config["freeform_prompt"],
-                    "use_template": st.session_state.metadata_config["use_template"],
-                    "template_id": st.session_state.metadata_config["template_id"],
-                    "custom_fields": st.session_state.metadata_config["custom_fields"],
-                    "ai_model": st.session_state.metadata_config["ai_model"],
-                    "batch_size": st.session_state.metadata_config["batch_size"],
-                    "document_type_prompts": st.session_state.metadata_config.get("document_type_prompts", {}),
-                    "document_type_to_template": st.session_state.document_type_to_template if hasattr(st.session_state, "document_type_to_template") else {}
-                }
-                
-                st.success(f"Template '{template_name}' saved successfully")
-            else:
-                st.error("Please enter a template name")
-        
-        st.subheader("Load Template")
-        
-        if "saved_templates" in st.session_state and st.session_state.saved_templates:
-            template_options = list(st.session_state.saved_templates.keys())
-            selected_template = st.selectbox(
-                "Select a template",
-                options=template_options,
-                key="load_template_selectbox"
-            )
-            
-            if st.button("Load Template", key="load_template_button"):
-                # Load template
-                template = st.session_state.saved_templates[selected_template]
-                
-                # Update metadata config
-                st.session_state.metadata_config["extraction_method"] = template["extraction_method"]
-                st.session_state.metadata_config["freeform_prompt"] = template["freeform_prompt"]
-                st.session_state.metadata_config["use_template"] = template["use_template"]
-                st.session_state.metadata_config["template_id"] = template["template_id"]
-                st.session_state.metadata_config["custom_fields"] = template["custom_fields"]
-                st.session_state.metadata_config["ai_model"] = template["ai_model"]
-                st.session_state.metadata_config["batch_size"] = template["batch_size"]
-                
-                if "document_type_prompts" in template:
-                    st.session_state.metadata_config["document_type_prompts"] = template["document_type_prompts"]
-                
-                if "document_type_to_template" in template:
-                    st.session_state.document_type_to_template = template["document_type_to_template"]
-                
-                st.success(f"Template '{selected_template}' loaded successfully")
-                st.rerun()
-        else:
-            st.info("No saved templates yet")
-    
-    # Process files button
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        start_button = st.button("Start Processing", key="start_processing_button", use_container_width=True)
-    
-    with col2:
-        cancel_button = st.button("Cancel Processing", key="cancel_processing_button", use_container_width=True)
-    
-    # Process files
-    if start_button:
-        # Reset processing state
-        st.session_state.processing_state = {
-            "is_processing": True,
-            "processed_files": 0,
-            "total_files": len(st.session_state.selected_files),
-            "current_file_index": -1,
-            "current_file": "",
-            "results": {},
-            "errors": {},
-            "retries": {},
-            "max_retries": max_retries,
-            "retry_delay": retry_delay,
-            "processing_mode": processing_mode,
-            "visualization_data": {}
-        }
-        
-        # Reset extraction results
-        st.session_state.extraction_results = {}
+        # Progress tracking
+        progress_container = st.container()
         
         # Process files
-        process_files_with_progress(
-            st.session_state.selected_files,
-            get_extraction_functions(),
-            batch_size=batch_size,
-            processing_mode=processing_mode
-        )
-    
-    # Cancel processing
-    if cancel_button and st.session_state.processing_state.get("is_processing", False):
-        st.session_state.processing_state["is_processing"] = False
-        st.warning("Processing cancelled")
-    
-    # Display processing progress
-    if st.session_state.processing_state.get("is_processing", False):
-        # Create progress bar
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # Update progress
-        processed_files = st.session_state.processing_state["processed_files"]
-        total_files = st.session_state.processing_state["total_files"]
-        current_file = st.session_state.processing_state["current_file"]
-        
-        # Calculate progress
-        progress = processed_files / total_files if total_files > 0 else 0
-        
-        # Update progress bar
-        progress_bar.progress(progress)
-        
-        # Update status text
-        if current_file:
-            status_text.text(f"Processing {current_file}... ({processed_files}/{total_files})")
-        else:
-            status_text.text(f"Processed {processed_files}/{total_files} files")
-    
-    # Display processing results
-    if "results" in st.session_state.processing_state and st.session_state.processing_state["results"]:
-        st.write("### Processing Results")
-        
-        # Display success message
-        processed_files = len(st.session_state.processing_state["results"])
-        error_files = len(st.session_state.processing_state["errors"]) if "errors" in st.session_state.processing_state else 0
-        
-        if error_files == 0:
-            st.success(f"Processing complete! Successfully processed {processed_files} files.")
-        else:
-            st.warning(f"Processing complete! Successfully processed {processed_files} files with {error_files} errors.")
-        
-        # Display errors if any
-        if "errors" in st.session_state.processing_state and st.session_state.processing_state["errors"]:
-            st.write("### Errors")
+        if start_button:
+            # Reset processing state
+            st.session_state.processing_state = {
+                "is_processing": True,
+                "processed_files": 0,
+                "total_files": len(st.session_state.selected_files),
+                "current_file_index": -1,
+                "current_file": "",
+                "results": {},
+                "errors": {},
+                "retries": {},
+                "max_retries": max_retries,
+                "retry_delay": retry_delay,
+                "processing_mode": processing_mode,
+                "visualization_data": {}
+            }
             
-            for file_id, error in st.session_state.processing_state["errors"].items():
-                # Find file name
-                file_name = ""
-                for file in st.session_state.selected_files:
-                    if file["id"] == file_id:
-                        file_name = file["name"]
-                        break
-                
-                st.error(f"{file_name}: {error}")
+            # Reset extraction results
+            st.session_state.extraction_results = {}
+            
+            # Get metadata extraction functions
+            extraction_functions = get_extraction_functions()
+            
+            # Process files with progress tracking
+            process_files_with_progress(
+                st.session_state.selected_files,
+                extraction_functions,
+                batch_size=batch_size,
+                processing_mode=processing_mode
+            )
         
-        # Continue button
-        st.write("---")
-        if st.button("Continue to View Results", key="continue_to_results_button", use_container_width=True):
-            st.session_state.current_page = "View Results"
-            st.rerun()
+        # Cancel processing
+        if cancel_button and st.session_state.processing_state.get("is_processing", False):
+            st.session_state.processing_state["is_processing"] = False
+            st.warning("Processing cancelled")
+        
+        # Display processing progress
+        if st.session_state.processing_state.get("is_processing", False):
+            with progress_container:
+                # Create progress bar
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                # Update progress
+                processed_files = st.session_state.processing_state["processed_files"]
+                total_files = st.session_state.processing_state["total_files"]
+                current_file = st.session_state.processing_state["current_file"]
+                
+                # Calculate progress
+                progress = processed_files / total_files if total_files > 0 else 0
+                
+                # Update progress bar
+                progress_bar.progress(progress)
+                
+                # Update status text
+                if current_file:
+                    status_text.text(f"Processing {current_file}... ({processed_files}/{total_files})")
+                else:
+                    status_text.text(f"Processed {processed_files}/{total_files} files")
+        
+        # Display processing results
+        if "results" in st.session_state.processing_state and st.session_state.processing_state["results"]:
+            st.write("### Processing Results")
+            
+            # Display success message
+            processed_files = len(st.session_state.processing_state["results"])
+            error_files = len(st.session_state.processing_state["errors"]) if "errors" in st.session_state.processing_state else 0
+            
+            if error_files == 0:
+                st.success(f"Processing complete! Successfully processed {processed_files} files.")
+            else:
+                st.warning(f"Processing complete! Successfully processed {processed_files} files with {error_files} errors.")
+            
+            # Display errors if any
+            if "errors" in st.session_state.processing_state and st.session_state.processing_state["errors"]:
+                st.write("### Errors")
+                
+                for file_id, error in st.session_state.processing_state["errors"].items():
+                    # Find file name
+                    file_name = ""
+                    for file in st.session_state.selected_files:
+                        if file["id"] == file_id:
+                            file_name = file["name"]
+                            break
+                    
+                    st.error(f"{file_name}: {error}")
+            
+            # Continue button
+            st.write("---")
+            if st.button("Continue to View Results", key="continue_to_results_button", use_container_width=True):
+                st.session_state.current_page = "View Results"
+                st.rerun()
+    
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        logger.error(f"Error in process_files: {str(e)}")
+
+# Helper function to extract structured data from API response
+def extract_structured_data_from_response(response):
+    """
+    Extract structured data from various possible response structures
+    
+    Args:
+        response (dict): API response
+        
+    Returns:
+        dict: Extracted structured data (key-value pairs)
+    """
+    structured_data = {}
+    extracted_text = ""
+    
+    # Log the response structure for debugging
+    logger.info(f"Response structure: {json.dumps(response, indent=2) if isinstance(response, dict) else str(response)}")
+    
+    if isinstance(response, dict):
+        # Check for answer field (contains structured data in JSON format)
+        if "answer" in response and isinstance(response["answer"], dict):
+            structured_data = response["answer"]
+            logger.info(f"Found structured data in 'answer' field: {structured_data}")
+            return structured_data
+        
+        # Check for answer field as string (JSON string)
+        if "answer" in response and isinstance(response["answer"], str):
+            try:
+                answer_data = json.loads(response["answer"])
+                if isinstance(answer_data, dict):
+                    structured_data = answer_data
+                    logger.info(f"Found structured data in 'answer' field (JSON string): {structured_data}")
+                    return structured_data
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse 'answer' field as JSON: {response['answer']}")
+        
+        # Check for key-value pairs directly in response
+        for key, value in response.items():
+            if key not in ["error", "items", "response", "item_collection", "entries", "type", "id", "sequence_id"]:
+                structured_data[key] = value
+        
+        # Check in response field
+        if "response" in response and isinstance(response["response"], dict):
+            response_obj = response["response"]
+            if "answer" in response_obj and isinstance(response_obj["answer"], dict):
+                structured_data = response_obj["answer"]
+                logger.info(f"Found structured data in 'response.answer' field: {structured_data}")
+                return structured_data
+        
+        # Check in items array
+        if "items" in response and isinstance(response["items"], list) and len(response["items"]) > 0:
+            item = response["items"][0]
+            if isinstance(item, dict):
+                if "answer" in item and isinstance(item["answer"], dict):
+                    structured_data = item["answer"]
+                    logger.info(f"Found structured data in 'items[0].answer' field: {structured_data}")
+                    return structured_data
+    
+    # If we couldn't find structured data, return empty dict
+    if not structured_data:
+        logger.warning("Could not find structured data in response")
+    
+    return structured_data
 
 def process_files_with_progress(files, extraction_functions, batch_size=5, processing_mode="Sequential"):
     """
@@ -274,7 +384,7 @@ def process_files_with_progress(files, extraction_functions, batch_size=5, proce
             # Submit tasks
             future_to_file = {}
             for file in files:
-                future = executor.submit(process_single_file, file, extraction_functions)
+                future = executor.submit(process_file, file, extraction_functions)
                 future_to_file[future] = file
             
             # Process results as they complete
@@ -315,7 +425,7 @@ def process_files_with_progress(files, extraction_functions, batch_size=5, proce
             
             try:
                 # Process file
-                result = process_single_file(file, extraction_functions)
+                result = process_file(file, extraction_functions)
                 
                 # Update processing state
                 st.session_state.processing_state["processed_files"] += 1
@@ -341,7 +451,7 @@ def process_files_with_progress(files, extraction_functions, batch_size=5, proce
     # Rerun to update UI
     st.rerun()
 
-def process_single_file(file, extraction_functions):
+def process_file(file, extraction_functions):
     """
     Process a single file
     
@@ -353,87 +463,117 @@ def process_single_file(file, extraction_functions):
         dict: Processing result
     """
     try:
-        # Get file ID and name
         file_id = file["id"]
         file_name = file["name"]
         
-        # Log processing start
-        if DEBUG_MODE:
-            logger.info(f"Processing file: {file_name} ({file_id})")
+        logger.info(f"Processing file: {file_name} (ID: {file_id})")
         
-        # Get document type if available
-        document_type = None
-        if (hasattr(st.session_state, "document_categorization") and 
-            "results" in st.session_state.document_categorization and 
-            file_id in st.session_state.document_categorization["results"]):
-            document_type = st.session_state.document_categorization["results"][file_id]["document_type"]
+        # Check if we have feedback data for this file
+        feedback_key = f"{file_id}_{st.session_state.metadata_config['extraction_method']}"
+        has_feedback = feedback_key in st.session_state.feedback_data
         
-        # Get extraction method
-        extraction_method = st.session_state.metadata_config["extraction_method"]
+        if has_feedback:
+            logger.info(f"Using feedback data for file: {file_name}")
         
-        # Get extraction function
-        if extraction_method == "freeform":
-            extraction_func = extraction_functions["freeform"]
-        else:
-            extraction_func = extraction_functions["structured"]
-        
-        # Check if using document type templates
-        use_document_type_template = (
-            document_type is not None and 
-            hasattr(st.session_state, "document_type_to_template") and 
-            document_type in st.session_state.document_type_to_template and 
-            st.session_state.document_type_to_template[document_type] is not None and 
-            st.session_state.document_type_to_template[document_type] != ""
-        )
-        
-        # Get template ID
-        template_id = None
-        if use_document_type_template:
-            template_id = st.session_state.document_type_to_template[document_type]
-        elif st.session_state.metadata_config["use_template"]:
-            template_id = st.session_state.metadata_config["template_id"]
-        
-        # Get AI model
-        ai_model = st.session_state.metadata_config["ai_model"]
-        
-        # Get prompt for freeform extraction
-        prompt = None
-        if extraction_method == "freeform":
-            # Check if using document type specific prompt
-            if (document_type is not None and 
-                "document_type_prompts" in st.session_state.metadata_config and 
-                document_type in st.session_state.metadata_config["document_type_prompts"]):
-                prompt = st.session_state.metadata_config["document_type_prompts"][document_type]
+        # Determine extraction method
+        if st.session_state.metadata_config["extraction_method"] == "structured":
+            # Structured extraction
+            if st.session_state.metadata_config["use_template"]:
+                # Template-based extraction
+                template_id = st.session_state.metadata_config["template_id"]
+                metadata_template = {
+                    "templateKey": template_id.split("_")[1] if "_" in template_id else template_id,
+                    "scope": template_id.split("_")[0] if "_" in template_id else "enterprise",
+                    "type": "metadata_template"
+                }
+                
+                logger.info(f"Using template-based extraction with template ID: {template_id}")
+                
+                # Use real API call
+                api_result = extraction_functions["extract_structured_metadata"](
+                    file_id=file_id,
+                    metadata_template=metadata_template,
+                    ai_model=st.session_state.metadata_config["ai_model"]
+                )
+                
+                # Create a clean result object with the extracted data
+                result = {}
+                
+                # Copy fields from API result to our result object
+                if isinstance(api_result, dict):
+                    for key, value in api_result.items():
+                        if key not in ["error", "items", "response"]:
+                            result[key] = value
+                
+                # Apply feedback if available
+                if has_feedback:
+                    feedback = st.session_state.feedback_data[feedback_key]
+                    # Merge feedback with result, prioritizing feedback
+                    for key, value in feedback.items():
+                        result[key] = value
             else:
-                prompt = st.session_state.metadata_config["freeform_prompt"]
-        
-        # Get custom fields for structured extraction
-        custom_fields = None
-        if extraction_method == "structured" and not template_id:
-            custom_fields = st.session_state.metadata_config["custom_fields"]
-        
-        # Extract metadata
-        if extraction_method == "freeform":
-            result = extraction_func(
-                st.session_state.client,
-                file_id,
-                prompt=prompt,
-                ai_model=ai_model
-            )
+                # Custom fields extraction
+                logger.info(f"Using custom fields extraction with {len(st.session_state.metadata_config['custom_fields'])} fields")
+                
+                # Use real API call
+                api_result = extraction_functions["extract_structured_metadata"](
+                    file_id=file_id,
+                    fields=st.session_state.metadata_config["custom_fields"],
+                    ai_model=st.session_state.metadata_config["ai_model"]
+                )
+                
+                # Create a clean result object with the extracted data
+                result = {}
+                
+                # Copy fields from API result to our result object
+                if isinstance(api_result, dict):
+                    for key, value in api_result.items():
+                        if key not in ["error", "items", "response"]:
+                            result[key] = value
+                
+                # Apply feedback if available
+                if has_feedback:
+                    feedback = st.session_state.feedback_data[feedback_key]
+                    # Merge feedback with result, prioritizing feedback
+                    for key, value in feedback.items():
+                        result[key] = value
         else:
-            result = extraction_func(
-                st.session_state.client,
-                file_id,
-                template_id=template_id,
-                custom_fields=custom_fields,
-                ai_model=ai_model
+            # Freeform extraction
+            logger.info(f"Using freeform extraction with prompt: {st.session_state.metadata_config['freeform_prompt'][:30]}...")
+            
+            # Use real API call
+            api_result = extraction_functions["extract_freeform_metadata"](
+                file_id=file_id,
+                prompt=st.session_state.metadata_config["freeform_prompt"],
+                ai_model=st.session_state.metadata_config["ai_model"]
             )
+            
+            # Extract structured data from the API response
+            structured_data = extract_structured_data_from_response(api_result)
+            
+            # Create a clean result object with the structured data
+            result = structured_data
+            
+            # If no structured data was found, include the raw response for debugging
+            if not structured_data and isinstance(api_result, dict):
+                result["_raw_response"] = api_result
+            
+            # Apply feedback if available
+            if has_feedback:
+                feedback = st.session_state.feedback_data[feedback_key]
+                # For freeform, we might have feedback on key-value pairs
+                for key, value in feedback.items():
+                    result[key] = value
         
-        # Log processing result
-        if DEBUG_MODE:
-            logger.info(f"Processed file: {file_name} ({file_id}) - Success")
+        # Check for errors
+        if isinstance(api_result, dict) and "error" in api_result:
+            logger.error(f"Error processing file {file_name}: {api_result['error']}")
+            return {
+                "success": False,
+                "error": api_result["error"]
+            }
         
-        # Return result
+        logger.info(f"Successfully processed file: {file_name}")
         return {
             "success": True,
             "data": result
@@ -457,18 +597,18 @@ def get_extraction_functions():
         dict: Dictionary of extraction functions
     """
     try:
-        # Import extraction functions
-        from modules.metadata_extraction import extract_metadata_freeform, extract_metadata_structured
+        # Import metadata extraction function
+        from modules.metadata_extraction import metadata_extraction
+        
+        # Get extraction functions
+        extraction_functions = metadata_extraction()
         
         # Return functions
-        return {
-            "freeform": extract_metadata_freeform,
-            "structured": extract_metadata_structured
-        }
+        return extraction_functions
     except ImportError as e:
         logger.error(f"Error importing extraction functions: {str(e)}")
         st.error(f"Error importing extraction functions: {str(e)}")
         return {
-            "freeform": lambda client, file_id, **kwargs: {"error": "Extraction function not available"},
-            "structured": lambda client, file_id, **kwargs: {"error": "Extraction function not available"}
+            "extract_freeform_metadata": lambda file_id, **kwargs: {"error": "Extraction function not available"},
+            "extract_structured_metadata": lambda file_id, **kwargs: {"error": "Extraction function not available"}
         }
