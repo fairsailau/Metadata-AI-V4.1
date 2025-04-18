@@ -1,6 +1,6 @@
 import streamlit as st
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import json
 import pandas as pd
 
@@ -103,10 +103,17 @@ def metadata_config():
             mapping_data = []
             
             for document_type, template in document_type_to_template.items():
+                template_name = "None (Freeform)"
+                template_id = ""
+                
+                if template is not None:
+                    template_name = template.get("displayName", "Unknown")
+                    template_id = template.get("id", "")
+                
                 mapping_data.append({
                     "Document Type": document_type,
-                    "Suggested Template": template.get("displayName", "None") if template else "None (Freeform)",
-                    "Template ID": template.get("id", "") if template else ""
+                    "Suggested Template": template_name,
+                    "Template ID": template_id
                 })
             
             if mapping_data:
@@ -342,74 +349,77 @@ def configure_structured_extraction():
                     st.session_state.metadata_config["template_id"] = template.get("id")
                     
                     # Display template details
-                    st.write(f"Template: {selected_template_name}")
+                    st.write(f"Template ID: {template.get('id')}")
+                    st.write(f"Template Key: {template.get('templateKey')}")
+                    st.write(f"Scope: {template.get('scope')}")
                     
-                    # Display template fields if available
+                    # Display fields if available
                     if "fields" in template:
-                        st.write("Template fields:")
+                        st.write("#### Template Fields")
                         for field in template["fields"]:
-                            st.write(f"- {field.get('displayName', field.get('key', 'Unknown'))}: {field.get('type', 'string')}")
-                    break
+                            st.write(f"- {field.get('displayName')} ({field.get('type')})")
     else:
         # Custom fields definition
         st.write("#### Define Custom Fields")
-        st.write("Define the fields you want to extract from your files.")
         
-        # Add new field button
+        # Initialize custom fields if not exists
+        if "custom_fields" not in st.session_state.metadata_config:
+            st.session_state.metadata_config["custom_fields"] = []
+        
+        # Display existing fields
+        if st.session_state.metadata_config["custom_fields"]:
+            st.write("Current fields:")
+            
+            # Create a DataFrame for display
+            fields_data = []
+            
+            for i, field in enumerate(st.session_state.metadata_config["custom_fields"]):
+                fields_data.append({
+                    "Field Name": field["display_name"],
+                    "Field Type": field["type"],
+                    "Field Key": field["key"]
+                })
+            
+            fields_df = pd.DataFrame(fields_data)
+            st.dataframe(fields_df)
+            
+            # Option to remove fields
+            if st.button("Remove All Fields"):
+                st.session_state.metadata_config["custom_fields"] = []
+                st.rerun()
+        
+        # Add new field
+        st.write("Add a new field:")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            field_name = st.text_input("Field Name", key="new_field_name")
+        
+        with col2:
+            field_type = st.selectbox(
+                "Field Type",
+                options=["string", "float", "date", "enum"],
+                key="new_field_type"
+            )
+        
+        # Add field button
         if st.button("Add Field"):
-            st.session_state.metadata_config["custom_fields"].append({
-                "key": f"field_{len(st.session_state.metadata_config['custom_fields'])}",
-                "display_name": "",
-                "description": "",
-                "prompt": "",
-                "type": "string",
-                "options": []
-            })
-        
-        # Display and edit fields
-        for i, field in enumerate(st.session_state.metadata_config["custom_fields"]):
-            with st.expander(f"Field {i+1}: {field['display_name'] or 'New Field'}"):
-                col1, col2 = st.columns(2)
+            if field_name:
+                # Create field key from name (lowercase, replace spaces with underscores)
+                field_key = field_name.lower().replace(" ", "_")
                 
-                with col1:
-                    field["key"] = st.text_input("Field Key (unique identifier)", 
-                                                value=field["key"], 
-                                                key=f"key_{i}")
-                    
-                    field["display_name"] = st.text_input("Display Name", 
-                                                        value=field["display_name"], 
-                                                        key=f"display_{i}")
+                # Add field to custom fields
+                st.session_state.metadata_config["custom_fields"].append({
+                    "display_name": field_name,
+                    "key": field_key,
+                    "type": field_type
+                })
                 
-                with col2:
-                    field["type"] = st.selectbox("Field Type", 
-                                                options=["string", "date", "float", "multiSelect"], 
-                                                index=["string", "date", "float", "multiSelect"].index(field["type"]),
-                                                key=f"type_{i}")
-                
-                field["description"] = st.text_area("Description", 
-                                                  value=field["description"], 
-                                                  key=f"desc_{i}")
-                
-                field["prompt"] = st.text_area("Extraction Prompt (instructions for AI)", 
-                                             value=field["prompt"], 
-                                             key=f"prompt_{i}")
-                
-                # Options for multiSelect type
-                if field["type"] == "multiSelect":
-                    st.write("Options (one per line):")
-                    options_text = "\n".join([opt["key"] for opt in field["options"]])
-                    new_options_text = st.text_area("Options", 
-                                                  value=options_text, 
-                                                  key=f"options_{i}")
-                    
-                    # Update options if changed
-                    if new_options_text != options_text:
-                        field["options"] = [{"key": opt.strip()} for opt in new_options_text.split("\n") if opt.strip()]
-                
-                # Remove field button
-                if st.button("Remove Field", key=f"remove_{i}"):
-                    st.session_state.metadata_config["custom_fields"].pop(i)
-                    st.rerun()
+                st.success(f"Field '{field_name}' added successfully!")
+                st.rerun()
+            else:
+                st.warning("Please enter a field name.")
 
 def configure_freeform_extraction():
     """
@@ -417,14 +427,34 @@ def configure_freeform_extraction():
     """
     st.subheader("Freeform Extraction Configuration")
     
+    # Initialize freeform prompt if not exists
     if "freeform_prompt" not in st.session_state.metadata_config:
-        st.session_state.metadata_config["freeform_prompt"] = ""
+        st.session_state.metadata_config["freeform_prompt"] = "Extract key metadata from this document including dates, names, amounts, and other important information."
     
+    # Freeform prompt input
     st.session_state.metadata_config["freeform_prompt"] = st.text_area(
         "Extraction Prompt",
         value=st.session_state.metadata_config["freeform_prompt"],
         height=150,
-        help="Provide instructions for the AI on what metadata to extract from the files."
+        help="Provide a prompt for the AI to extract metadata from the document."
     )
     
-    st.info("Example prompt: Extract the following information from this document: vendor name, invoice number, date, total amount, and line items.")
+    # Prompt suggestions
+    st.write("#### Prompt Suggestions")
+    
+    prompt_suggestions = {
+        "General": "Extract key metadata from this document including dates, names, amounts, and other important information.",
+        "Invoice": "Extract invoice metadata including invoice number, date, due date, total amount, tax amount, vendor name, and line items.",
+        "Contract": "Extract contract metadata including parties involved, effective date, termination date, contract value, and key terms.",
+        "Resume": "Extract resume metadata including name, contact information, education, work experience, skills, and certifications."
+    }
+    
+    selected_suggestion = st.selectbox(
+        "Select a suggestion:",
+        options=list(prompt_suggestions.keys()),
+        index=0
+    )
+    
+    if st.button("Use Suggestion"):
+        st.session_state.metadata_config["freeform_prompt"] = prompt_suggestions[selected_suggestion]
+        st.rerun()
