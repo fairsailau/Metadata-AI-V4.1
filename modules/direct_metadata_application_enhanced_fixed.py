@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 def apply_metadata_direct():
     """
-    Enhanced direct approach to apply metadata to Box files with improved UI data extraction
+    Direct approach to apply metadata to Box files with direct extraction from debug sidebar
     """
     st.title("Apply Metadata")
     
@@ -94,9 +94,8 @@ def apply_metadata_direct():
                 file_id_to_file_name[file_id] = file_name
                 logger.info(f"Added file ID {file_id} from selected_files")
     
-    # DIRECT ACCESS TO EXTRACTION RESULTS
-    # This is a more direct approach to access the extraction results
-    # based on the structure observed in the screenshots
+    # DIRECT EXTRACTION FROM EXTRACTION RESULTS
+    # This is the key part that needs to be fixed
     
     # First, try to access extraction_results directly
     for key, result in extraction_results.items():
@@ -133,38 +132,17 @@ def apply_metadata_direct():
                     file_name = key.split("(")[0].strip()
                     file_id_to_file_name[file_id] = file_name
                 
-                # Extract metadata
+                # CRITICAL FIX: Extract metadata directly from the result
+                # This is the key fix - we need to use the result directly as metadata
                 if isinstance(result, dict):
-                    # Try different paths to find metadata
-                    if "result" in result and result["result"]:
-                        file_id_to_metadata[file_id] = result["result"]
-                        logger.info(f"Found metadata in result field for file ID {file_id}")
-                    elif "api_response" in result and "answer" in result["api_response"]:
-                        # Try to parse answer as JSON if it's a string
-                        answer = result["api_response"]["answer"]
-                        if isinstance(answer, str):
-                            try:
-                                parsed_answer = json.loads(answer)
-                                file_id_to_metadata[file_id] = parsed_answer
-                                logger.info(f"Found metadata in api_response.answer field (parsed JSON) for file ID {file_id}")
-                            except json.JSONDecodeError:
-                                file_id_to_metadata[file_id] = {"extracted_text": answer}
-                                logger.info(f"Found metadata as text in api_response.answer field for file ID {file_id}")
-                        else:
-                            file_id_to_metadata[file_id] = answer
-                            logger.info(f"Found metadata in api_response.answer field (direct) for file ID {file_id}")
-                    else:
-                        # Use the entire result as metadata
-                        metadata_dict = {k: v for k, v in result.items() 
-                                      if k not in ["file_id", "file_name"] and not k.startswith("_")}
-                        if metadata_dict:
-                            file_id_to_metadata[file_id] = metadata_dict
-                            logger.info(f"Using entire result as metadata for file ID {file_id}")
+                    # Use the entire result as metadata
+                    # This is what's displayed in the debug sidebar
+                    file_id_to_metadata[file_id] = result
+                    logger.info(f"Using entire result as metadata for file ID {file_id}")
                 
                 logger.info(f"Added file ID {file_id} from key {key}")
     
-    # If we still don't have metadata, try to extract it from the UI display data
-    # This is based on the structure observed in the screenshots
+    # If we still don't have metadata, try to extract it from the processing state
     if "processing_state" in st.session_state:
         processing_state = st.session_state.processing_state
         
@@ -182,172 +160,11 @@ def apply_metadata_direct():
                         file_id_to_file_name[file_id] = result["file_name"]
                     
                     # Extract metadata
-                    if "result" in result:
-                        file_id_to_metadata[file_id] = result["result"]
-                        logger.info(f"Found metadata in processing_state.results[{file_id}].result")
-                    elif "api_response" in result and "answer" in result["api_response"]:
-                        # Try to parse answer as JSON if it's a string
-                        answer = result["api_response"]["answer"]
-                        if isinstance(answer, str):
-                            try:
-                                parsed_answer = json.loads(answer)
-                                file_id_to_metadata[file_id] = parsed_answer
-                                logger.info(f"Found metadata in processing_state.results[{file_id}].api_response.answer (parsed JSON)")
-                            except json.JSONDecodeError:
-                                file_id_to_metadata[file_id] = {"extracted_text": answer}
-                                logger.info(f"Found metadata as text in processing_state.results[{file_id}].api_response.answer")
-                        else:
-                            file_id_to_metadata[file_id] = answer
-                            logger.info(f"Found metadata in processing_state.results[{file_id}].api_response.answer (direct)")
+                    # CRITICAL FIX: Use the entire result as metadata
+                    file_id_to_metadata[file_id] = result
+                    logger.info(f"Using entire processing_state result as metadata for file ID {file_id}")
                     
                     logger.info(f"Added file ID {file_id} from processing_state results")
-                # Even if the file ID is already in available_file_ids, still try to extract metadata
-                elif file_id not in file_id_to_metadata:
-                    # Extract metadata
-                    if "result" in result:
-                        file_id_to_metadata[file_id] = result["result"]
-                        logger.info(f"Found metadata in processing_state.results[{file_id}].result for existing file ID")
-                    elif "api_response" in result and "answer" in result["api_response"]:
-                        # Try to parse answer as JSON if it's a string
-                        answer = result["api_response"]["answer"]
-                        if isinstance(answer, str):
-                            try:
-                                parsed_answer = json.loads(answer)
-                                file_id_to_metadata[file_id] = parsed_answer
-                                logger.info(f"Found metadata in processing_state.results[{file_id}].api_response.answer (parsed JSON) for existing file ID")
-                            except json.JSONDecodeError:
-                                file_id_to_metadata[file_id] = {"extracted_text": answer}
-                                logger.info(f"Found metadata as text in processing_state.results[{file_id}].api_response.answer for existing file ID")
-                        else:
-                            file_id_to_metadata[file_id] = answer
-                            logger.info(f"Found metadata in processing_state.results[{file_id}].api_response.answer (direct) for existing file ID")
-    
-    # NEW: Extract metadata from UI display data
-    # This is the key addition that was missing in V4.1 but present in V3.0
-    def extract_metadata_from_ui():
-        """Extract metadata from UI display data"""
-        ui_metadata = {}
-        
-        # Check for session state variables that might contain UI display data
-        for key, value in st.session_state.items():
-            # Look for edit_ keys which are created in the View Results page
-            if key.startswith("edit_") and "_" in key:
-                parts = key.split("_")
-                if len(parts) >= 3:
-                    # Format is typically edit_FILE_ID_FIELD_NAME
-                    file_id = parts[1]
-                    field_name = "_".join(parts[2:])
-                    
-                    # Initialize metadata for this file ID if not already done
-                    if file_id not in ui_metadata:
-                        ui_metadata[file_id] = {}
-                    
-                    # Add the field value to the metadata
-                    ui_metadata[file_id][field_name] = value
-                    logger.info(f"Found UI metadata for file ID {file_id}, field {field_name}: {value}")
-        
-        # Check if we have any UI display data in session state
-        if hasattr(st.session_state, "results_filter") and isinstance(st.session_state.results_filter, dict):
-            results_filter = st.session_state.results_filter
-            logger.info(f"Found results_filter in session state")
-            
-            # If we have displayed_results, it might contain the displayed metadata
-            if "displayed_results" in results_filter:
-                displayed_results = results_filter["displayed_results"]
-                logger.info(f"Found displayed results in results_filter")
-                
-                # Extract metadata from displayed results
-                for result in displayed_results:
-                    if "file_id" in result and result["file_id"]:
-                        file_id = result["file_id"]
-                        
-                        # Initialize metadata for this file ID if not already done
-                        if file_id not in ui_metadata:
-                            ui_metadata[file_id] = {}
-                        
-                        # Extract metadata
-                        if "metadata" in result:
-                            ui_metadata[file_id].update(result["metadata"])
-                            logger.info(f"Found UI metadata in displayed_results.metadata for file ID {file_id}")
-                        elif "extracted_data" in result:
-                            ui_metadata[file_id].update(result["extracted_data"])
-                            logger.info(f"Found UI metadata in displayed_results.extracted_data for file ID {file_id}")
-                        elif "result_data" in result:
-                            ui_metadata[file_id].update(result["result_data"])
-                            logger.info(f"Found UI metadata in displayed_results.result_data for file ID {file_id}")
-        
-        # Check for any edit_ fields in the current form state
-        for key in st.session_state:
-            if key.startswith("edit_") and "_" in key:
-                parts = key.split("_")
-                if len(parts) >= 3:
-                    # Format is typically edit_FILE_ID_FIELD_NAME
-                    file_id = parts[1]
-                    field_name = "_".join(parts[2:])
-                    
-                    # Initialize metadata for this file ID if not already done
-                    if file_id not in ui_metadata:
-                        ui_metadata[file_id] = {}
-                    
-                    # Add the field value to the metadata
-                    ui_metadata[file_id][field_name] = st.session_state[key]
-                    logger.info(f"Found UI metadata in form state for file ID {file_id}, field {field_name}: {st.session_state[key]}")
-        
-        # NEW: Extract metadata directly from the View Results page's displayed data
-        # This is the key part that was missing in V4.1
-        for file_id in available_file_ids:
-            if file_id not in file_id_to_metadata:
-                # Look for any session state variables that might contain the displayed metadata
-                for key in st.session_state:
-                    if key.endswith("_result_data") or key.startswith("result_data_"):
-                        # Check if this variable contains data for our file ID
-                        data = st.session_state[key]
-                        if isinstance(data, dict) and file_id in data:
-                            file_data = data[file_id]
-                            if isinstance(file_data, dict):
-                                # Initialize metadata for this file ID if not already done
-                                if file_id not in ui_metadata:
-                                    ui_metadata[file_id] = {}
-                                
-                                # Extract metadata
-                                ui_metadata[file_id].update(file_data)
-                                logger.info(f"Found UI metadata in {key} for file ID {file_id}")
-        
-        return ui_metadata
-    
-    # Extract metadata from UI display data
-    ui_metadata = extract_metadata_from_ui()
-    logger.info(f"Extracted UI metadata for {len(ui_metadata)} files")
-    
-    # Update file_id_to_metadata with UI metadata
-    for file_id, metadata in ui_metadata.items():
-        if file_id not in file_id_to_metadata:
-            file_id_to_metadata[file_id] = metadata
-            logger.info(f"Added metadata from UI for file ID {file_id}")
-        elif not file_id_to_metadata[file_id]:
-            file_id_to_metadata[file_id] = metadata
-            logger.info(f"Replaced empty metadata with UI metadata for file ID {file_id}")
-    
-    # NEW: Direct extraction from View Results page data
-    # This is the key addition that was missing in V4.1
-    # We'll look for the specific structure seen in the screenshot
-    for file_id in available_file_ids:
-        if file_id not in file_id_to_metadata or not file_id_to_metadata[file_id]:
-            # Create a dictionary to store the extracted metadata
-            extracted_metadata = {}
-            
-            # Check for edit_ fields in session state that match this file ID
-            for key, value in st.session_state.items():
-                if key.startswith(f"edit_{file_id}_"):
-                    # Extract the field name from the key
-                    field_name = key.replace(f"edit_{file_id}_", "")
-                    extracted_metadata[field_name] = value
-                    logger.info(f"Found metadata in edit field for file ID {file_id}, field {field_name}: {value}")
-            
-            # If we found any metadata, add it to file_id_to_metadata
-            if extracted_metadata:
-                file_id_to_metadata[file_id] = extracted_metadata
-                logger.info(f"Added metadata from edit fields for file ID {file_id}")
     
     # Remove duplicates while preserving order
     available_file_ids = list(dict.fromkeys(available_file_ids))
@@ -398,8 +215,7 @@ def apply_metadata_direct():
         key="filter_placeholders_checkbox"
     )
     
-    # NEW: Option to use UI display data
-    # This is the key option that was missing in V4.1 but present in V3.0
+    # Option to use UI display data
     use_ui_data = st.checkbox(
         "Use UI display data",
         value=True,
@@ -471,57 +287,39 @@ def apply_metadata_direct():
         try:
             file_name = file_id_to_file_name.get(file_id, "Unknown")
             
-            # If no metadata values provided and use_ui_data is enabled, try to get them from UI metadata
-            if (not metadata_values or not isinstance(metadata_values, dict)) and use_ui_data:
-                if file_id in ui_metadata:
-                    metadata_values = ui_metadata[file_id]
-                    logger.info(f"Using metadata from UI for file {file_name} ({file_id}): {json.dumps(metadata_values, default=str)}")
+            # CRITICAL FIX: Extract the actual metadata fields from the result
+            # This is what's displayed in the debug sidebar
+            if isinstance(metadata_values, dict):
+                # Check if this is the format we see in the debug sidebar
+                # with Document Type, Fiscal Year End Date, etc.
+                if "Document Type" in metadata_values or "document_type" in metadata_values:
+                    # Use it directly
+                    logger.info(f"Using metadata with Document Type field for file {file_name} ({file_id})")
+                else:
+                    # Try to extract metadata from nested structures
+                    extracted_metadata = {}
+                    
+                    # Look for common field names in the metadata
+                    for key, value in metadata_values.items():
+                        if key in ["metadata", "result", "extracted_data", "data"]:
+                            if isinstance(value, dict):
+                                extracted_metadata.update(value)
+                                logger.info(f"Extracted metadata from {key} field")
+                            elif isinstance(value, str):
+                                try:
+                                    parsed_value = json.loads(value)
+                                    if isinstance(parsed_value, dict):
+                                        extracted_metadata.update(parsed_value)
+                                        logger.info(f"Extracted metadata from parsed {key} field")
+                                except json.JSONDecodeError:
+                                    pass
+                    
+                    # If we found extracted metadata, use it
+                    if extracted_metadata:
+                        metadata_values = extracted_metadata
+                        logger.info(f"Using extracted metadata for file {file_name} ({file_id})")
             
-            # If still no metadata, try to find it in the extraction results
-            if not metadata_values or not isinstance(metadata_values, dict):
-                # Look for metadata in the extraction results
-                for key, result in extraction_results.items():
-                    if str(file_id) in key:
-                        # Try to extract metadata from this result
-                        if isinstance(result, dict):
-                            # Try different paths to find metadata
-                            if "result" in result and result["result"]:
-                                metadata_values = result["result"]
-                                logger.info(f"Found metadata in result field for file {file_name} ({file_id})")
-                                break
-                            elif "api_response" in result and "answer" in result["api_response"]:
-                                # Try to parse answer as JSON if it's a string
-                                answer = result["api_response"]["answer"]
-                                if isinstance(answer, str):
-                                    try:
-                                        parsed_answer = json.loads(answer)
-                                        metadata_values = parsed_answer
-                                        logger.info(f"Found metadata in api_response.answer field (parsed JSON) for file {file_name} ({file_id})")
-                                        break
-                                    except json.JSONDecodeError:
-                                        metadata_values = {"extracted_text": answer}
-                                        logger.info(f"Found metadata as text in api_response.answer field for file {file_name} ({file_id})")
-                                        break
-                                else:
-                                    metadata_values = answer
-                                    logger.info(f"Found metadata in api_response.answer field (direct) for file {file_name} ({file_id})")
-                                    break
-            
-            # If still no metadata, check if we have any in the session state
-            if not metadata_values or not isinstance(metadata_values, dict):
-                # Look for any session state variables that might contain metadata for this file
-                for key, value in st.session_state.items():
-                    if key.startswith(f"edit_{file_id}_"):
-                        # Initialize metadata_values if not already done
-                        if not metadata_values or not isinstance(metadata_values, dict):
-                            metadata_values = {}
-                        
-                        # Extract the field name from the key
-                        field_name = key.replace(f"edit_{file_id}_", "")
-                        metadata_values[field_name] = value
-                        logger.info(f"Found metadata in session state for file {file_name} ({file_id}), field {field_name}: {value}")
-            
-            # If still no metadata, use fallback metadata
+            # If no metadata values provided, use fallback metadata
             if not metadata_values or not isinstance(metadata_values, dict):
                 logger.warning(f"No metadata found for file {file_name} ({file_id}), using fallback metadata")
                 
