@@ -8,107 +8,9 @@ logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def extract_metadata_from_results(extraction_results, file_id):
-    """
-    Extract metadata from extraction results using multiple approaches
-    
-    Args:
-        extraction_results: Dictionary of extraction results
-        file_id: File ID to extract metadata for
-        
-    Returns:
-        dict: Extracted metadata values
-    """
-    metadata_values = {}
-    
-    # APPROACH 1: Direct extraction from first result (what's shown in the sidebar)
-    # This is critical for matching what the user sees in the UI
-    if extraction_results and len(extraction_results) > 0:
-        # Get the first extraction result (what's shown in the sidebar)
-        first_key = next(iter(extraction_results))
-        first_result = extraction_results[first_key]
-        
-        # Check if this is the format we see in the screenshots with all the fields
-        if isinstance(first_result, dict):
-            # Extract all fields that aren't internal fields
-            extracted_fields = {}
-            for key, value in first_result.items():
-                if not key.startswith("_") and key not in ["file_id", "file_name"]:
-                    extracted_fields[key] = value
-            
-            if extracted_fields:
-                logger.info(f"Extracted metadata directly from first result: {json.dumps(extracted_fields, default=str)}")
-                return extracted_fields
-    
-    # APPROACH 2: Try to find direct match in extraction_results
-    if file_id in extraction_results and isinstance(extraction_results[file_id], dict):
-        result = extraction_results[file_id]
-        
-        # Try different paths to find metadata
-        if "result" in result and result["result"]:
-            metadata_values = result["result"]
-        elif "api_response" in result and "answer" in result["api_response"]:
-            # Try to parse answer as JSON if it's a string
-            answer = result["api_response"]["answer"]
-            if isinstance(answer, str):
-                try:
-                    parsed_answer = json.loads(answer)
-                    metadata_values = parsed_answer
-                except json.JSONDecodeError:
-                    metadata_values = {"extracted_text": answer}
-            else:
-                metadata_values = answer
-        else:
-            # Use the entire result as metadata
-            metadata_values = {k: v for k, v in result.items() 
-                              if k not in ["file_id", "file_name"] and not k.startswith("_")}
-    
-    # APPROACH 3: If no direct match, look for composite keys
-    if not metadata_values:
-        for key, result in extraction_results.items():
-            # Check if this key contains our file ID
-            if isinstance(key, str) and str(file_id) in key:
-                # Try to extract metadata from this result
-                if isinstance(result, dict):
-                    # Try different paths to find metadata
-                    if "result" in result:
-                        result_data = result["result"]
-                        if isinstance(result_data, dict):
-                            metadata_values = result_data
-                            break
-                    elif "api_response" in result and "answer" in result["api_response"]:
-                        answer = result["api_response"]["answer"]
-                        try:
-                            # Try to parse as JSON
-                            if isinstance(answer, str):
-                                parsed_answer = json.loads(answer)
-                                if isinstance(parsed_answer, dict):
-                                    metadata_values = parsed_answer
-                                    break
-                            else:
-                                metadata_values = answer
-                                break
-                        except (json.JSONDecodeError, TypeError):
-                            continue
-    
-    # APPROACH 4: Extract from the raw extraction result
-    # This is a last resort to ensure we get something
-    if not metadata_values and extraction_results:
-        # Just use the first result directly
-        first_key = next(iter(extraction_results))
-        first_result = extraction_results[first_key]
-        
-        if isinstance(first_result, dict):
-            # Use the entire result as metadata
-            metadata_values = {k: v for k, v in first_result.items() 
-                              if k not in ["file_id", "file_name"] and not k.startswith("_")}
-            logger.info(f"Using raw extraction result as metadata: {json.dumps(metadata_values, default=str)}")
-    
-    return metadata_values
-
 def apply_metadata_direct():
     """
-    Direct approach to apply metadata to Box files with enhanced extraction from multiple sources
+    Direct approach to apply metadata to Box files with session state alignment fix
     """
     st.title("Apply Metadata")
     
@@ -129,15 +31,15 @@ def apply_metadata_direct():
         else:
             st.sidebar.write("**Client:** Not available")
             
-        if "extraction_results" in st.session_state:
-            st.sidebar.write("**Extraction Results Keys:**")
-            st.sidebar.write(list(st.session_state.extraction_results.keys()))
+        if "processing_state" in st.session_state:
+            st.sidebar.write("**Processing State Keys:**")
+            st.sidebar.write(list(st.session_state.processing_state.keys()))
             
-            # Dump the first extraction result for debugging
-            if st.session_state.extraction_results:
-                first_key = next(iter(st.session_state.extraction_results))
-                st.sidebar.write(f"**First Extraction Result ({first_key}):**")
-                st.sidebar.json(st.session_state.extraction_results[first_key])
+            # Dump the first processing result for debugging
+            if st.session_state.processing_state:
+                first_key = next(iter(st.session_state.processing_state))
+                st.sidebar.write(f"**First Processing Result ({first_key}):**")
+                st.sidebar.json(st.session_state.processing_state[first_key])
     
     # Check if client exists directly
     if 'client' not in st.session_state:
@@ -163,19 +65,19 @@ def apply_metadata_direct():
             st.rerun()
         return
     
-    # Check if extraction results exist
-    if "extraction_results" not in st.session_state or not st.session_state.extraction_results:
-        st.warning("No extraction results available. Please process files first.")
+    # Check if processing state exists
+    if "processing_state" not in st.session_state or not st.session_state.processing_state:
+        st.warning("No processing results available. Please process files first.")
         if st.button("Go to Process Files", key="go_to_process_files_btn"):
             st.session_state.current_page = "Process Files"
             st.rerun()
         return
     
-    # Debug the structure of extraction_results
-    extraction_results = st.session_state.extraction_results
-    logger.info(f"Extraction results keys: {list(extraction_results.keys())}")
+    # Debug the structure of processing_state
+    processing_state = st.session_state.processing_state
+    logger.info(f"Processing state keys: {list(processing_state.keys())}")
     
-    # Extract file IDs and metadata from extraction_results
+    # Extract file IDs and metadata from processing_state
     available_file_ids = []
     file_id_to_file_name = {}
     file_id_to_metadata = {}
@@ -186,158 +88,87 @@ def apply_metadata_direct():
         logger.info(f"Found {len(selected_files)} selected files in session state")
         for file_info in selected_files:
             if isinstance(file_info, dict) and "id" in file_info and file_info["id"]:
-                file_id = file_info["id"]
+                # CRITICAL FIX: Ensure file ID is a string
+                file_id = str(file_info["id"])
                 file_name = file_info.get("name", "Unknown")
                 available_file_ids.append(file_id)
                 file_id_to_file_name[file_id] = file_name
                 logger.info(f"Added file ID {file_id} from selected_files")
     
-    # ENHANCED EXTRACTION FROM EXTRACTION RESULTS
-    # This is the key part that has been fixed
+    # Process each file ID in processing_state
+    for key in processing_state.keys():
+        # CRITICAL FIX: Ensure key is a string
+        file_id = str(key)
+        logger.info(f"Processing file ID: {file_id} from processing_state")
+        
+        # Get the result for this file ID
+        result = processing_state.get(file_id, {})
+        
+        # Add to available file IDs if not already there
+        if file_id not in available_file_ids:
+            available_file_ids.append(file_id)
+        
+        # Extract file name if available
+        if "file_name" in result:
+            file_id_to_file_name[file_id] = result["file_name"]
+        
+        # CRITICAL FIX: Extract metadata from the correct location in processing_state
+        if "results" in result:
+            metadata_values = result["results"]
+            if metadata_values:
+                file_id_to_metadata[file_id] = metadata_values
+                logger.info(f"Extracted metadata from processing_state for file ID {file_id}: {json.dumps(metadata_values, default=str)}")
+            else:
+                logger.warning(f"Empty results for file ID {file_id} in processing_state")
+        else:
+            logger.warning(f"No results key for file ID {file_id} in processing_state")
+            # Use the entire result as metadata if no results key
+            file_id_to_metadata[file_id] = result
+            logger.info(f"Using entire result as metadata for file ID {file_id}")
     
-    # First, try to access extraction_results directly
-    for key, result in extraction_results.items():
-        logger.info(f"Checking extraction result key: {key}")
+    # If we still don't have metadata, check if extraction_results exists (for backward compatibility)
+    if not file_id_to_metadata and "extraction_results" in st.session_state:
+        extraction_results = st.session_state.extraction_results
+        logger.info(f"Checking extraction_results as fallback: {list(extraction_results.keys())}")
         
-        # Try to extract file ID from the key
-        file_id = None
-        
-        # Check if the key itself is a file ID (direct match)
-        if isinstance(key, str) and key.isdigit():
-            file_id = key
-        
-        # Check if the key contains a file ID in parentheses
-        elif isinstance(key, str) and "(" in key and ")" in key:
-            # Extract content between parentheses
-            start_idx = key.find("(") + 1
-            end_idx = key.find(")")
-            if start_idx > 0 and end_idx > start_idx:
-                potential_id = key[start_idx:end_idx]
-                if potential_id.isdigit():
-                    file_id = potential_id
-                    logger.info(f"Extracted file ID {file_id} from key {key}")
-        
-        # If we found a file ID, process it
-        if file_id:
-            if file_id not in available_file_ids:
-                available_file_ids.append(file_id)
-                
-                # Extract file name if available
-                if isinstance(result, dict) and "file_name" in result:
-                    file_id_to_file_name[file_id] = result["file_name"]
-                elif isinstance(key, str) and "(" in key and ")" in key:
-                    # Extract file name from the key (everything before the parentheses)
-                    file_name = key.split("(")[0].strip()
-                    file_id_to_file_name[file_id] = file_name
-                
-                # Extract metadata using the enhanced function
-                metadata_values = extract_metadata_from_results(extraction_results, file_id)
-                if metadata_values:
-                    file_id_to_metadata[file_id] = metadata_values
-                    logger.info(f"Extracted metadata for file ID {file_id}: {json.dumps(metadata_values, default=str)}")
-                else:
-                    # Fallback to using the entire result as metadata
-                    file_id_to_metadata[file_id] = result
-                    logger.info(f"Using entire result as metadata for file ID {file_id}")
-                
-                logger.info(f"Added file ID {file_id} from key {key}")
-    
-    # If we still don't have metadata, try to extract it from the processing state
-    if "processing_state" in st.session_state:
-        processing_state = st.session_state.processing_state
-        
-        # Check if we have results in processing_state
-        if "results" in processing_state:
-            processing_results = processing_state["results"]
-            logger.info(f"Found {len(processing_results)} results in processing_state")
+        for key, result in extraction_results.items():
+            # Try to extract file ID from the key
+            file_id = None
             
-            for file_id, result in processing_results.items():
+            # Check if the key itself is a file ID (direct match)
+            if isinstance(key, str) and key.isdigit():
+                file_id = key
+            
+            # Check if the key contains a file ID in parentheses
+            elif isinstance(key, str) and "(" in key and ")" in key:
+                # Extract content between parentheses
+                start_idx = key.find("(") + 1
+                end_idx = key.find(")")
+                if start_idx > 0 and end_idx > start_idx:
+                    potential_id = key[start_idx:end_idx]
+                    if potential_id.isdigit():
+                        file_id = potential_id
+                        logger.info(f"Extracted file ID {file_id} from key {key}")
+            
+            # If we found a file ID, process it
+            if file_id:
                 if file_id not in available_file_ids:
                     available_file_ids.append(file_id)
                     
                     # Extract file name if available
-                    if "file_name" in result:
+                    if isinstance(result, dict) and "file_name" in result:
                         file_id_to_file_name[file_id] = result["file_name"]
-                    
-                    # Extract metadata
-                    metadata_values = extract_metadata_from_results({"processing_result": result}, file_id)
-                    if metadata_values:
-                        file_id_to_metadata[file_id] = metadata_values
-                        logger.info(f"Extracted metadata from processing_state for file ID {file_id}")
-                    else:
-                        # Fallback to using the entire result as metadata
-                        file_id_to_metadata[file_id] = result
-                        logger.info(f"Using entire processing_state result as metadata for file ID {file_id}")
-                    
-                    logger.info(f"Added file ID {file_id} from processing_state results")
-    
-    # SPECIAL HANDLING FOR UI DISPLAY DATA
-    # This is based on the structure observed in the screenshots
-    
-    # Check if we have any UI display data in session state
-    if "results_filter" in st.session_state:
-        results_filter = st.session_state.results_filter
-        logger.info(f"Found results_filter in session state")
-        
-        # If we have a results_filter, it might contain the displayed metadata
-        if "displayed_results" in results_filter:
-            displayed_results = results_filter["displayed_results"]
-            logger.info(f"Found displayed results in results_filter")
-            
-            for result in displayed_results:
-                if "file_id" in result and result["file_id"]:
-                    file_id = result["file_id"]
-                    
-                    if file_id not in available_file_ids:
-                        available_file_ids.append(file_id)
-                    
-                    # Extract file name if available
-                    if "file_name" in result:
-                        file_id_to_file_name[file_id] = result["file_name"]
-                    
-                    # Extract metadata
-                    if "metadata" in result:
-                        file_id_to_metadata[file_id] = result["metadata"]
-                    elif "extracted_data" in result:
-                        file_id_to_metadata[file_id] = result["extracted_data"]
-                    
-                    logger.info(f"Added file ID {file_id} from displayed results")
-    
-    # CRITICAL FIX: Add direct extraction from the first extraction result
-    # This ensures we capture what's shown in the sidebar
-    if extraction_results and len(extraction_results) > 0 and available_file_ids:
-        # Get the first file ID
-        first_file_id = available_file_ids[0]
-        
-        # Get the first extraction result
-        first_key = next(iter(extraction_results))
-        first_result = extraction_results[first_key]
-        
-        # If we don't have metadata for this file ID yet, or if it's empty
-        if first_file_id not in file_id_to_metadata or not file_id_to_metadata[first_file_id]:
-            # Extract all fields that aren't internal fields
-            extracted_fields = {}
-            if isinstance(first_result, dict):
-                for key, value in first_result.items():
-                    if not key.startswith("_") and key not in ["file_id", "file_name"]:
-                        extracted_fields[key] = value
-            
-            # If we found fields, use them as metadata
-            if extracted_fields:
-                file_id_to_metadata[first_file_id] = extracted_fields
-                logger.info(f"Using first extraction result as metadata for file ID {first_file_id}: {json.dumps(extracted_fields, default=str)}")
-    
-    # FALLBACK: If we still don't have metadata for any file, create test metadata
-    # This ensures something is always available for testing
-    for file_id in available_file_ids:
-        if file_id not in file_id_to_metadata or not file_id_to_metadata[file_id]:
-            file_name = file_id_to_file_name.get(file_id, "Unknown")
-            file_id_to_metadata[file_id] = {
-                "test_key": "test_value",
-                "file_id": file_id,
-                "file_name": file_name
-            }
-            logger.info(f"Created fallback test metadata for file ID {file_id}")
+                    elif isinstance(key, str) and "(" in key and ")" in key:
+                        # Extract file name from the key (everything before the parentheses)
+                        file_name = key.split("(")[0].strip()
+                        file_id_to_file_name[file_id] = file_name
+                
+                # Extract metadata
+                if isinstance(result, dict):
+                    file_id_to_metadata[file_id] = result
+                    logger.info(f"Extracted metadata from extraction_results for file ID {file_id}")
+                
+                logger.info(f"Added file ID {file_id} from extraction_results")
     
     # Remove duplicates while preserving order
     available_file_ids = list(dict.fromkeys(available_file_ids))
@@ -386,14 +217,6 @@ def apply_metadata_direct():
         value=True,
         help="If checked, placeholder values like 'insert date' will be filtered out.",
         key="filter_placeholders_checkbox"
-    )
-    
-    # Option to use UI display data
-    use_ui_data = st.checkbox(
-        "Use UI display data",
-        value=True,
-        help="If checked, metadata displayed in the UI will be used even if not found in extraction results.",
-        key="use_ui_data_checkbox"
     )
     
     # Batch size (simplified to just 1)
@@ -460,30 +283,14 @@ def apply_metadata_direct():
         try:
             file_name = file_id_to_file_name.get(file_id, "Unknown")
             
-            # CRITICAL FIX: If metadata_values is empty, try to get it directly from extraction_results
-            if not metadata_values and extraction_results:
-                # Try to get metadata from the first extraction result
-                first_key = next(iter(extraction_results))
-                first_result = extraction_results[first_key]
-                
-                if isinstance(first_result, dict):
-                    # Extract all fields that aren't internal fields
-                    extracted_fields = {}
-                    for key, value in first_result.items():
-                        if not key.startswith("_") and key not in ["file_id", "file_name"]:
-                            extracted_fields[key] = value
-                    
-                    if extracted_fields:
-                        metadata_values = extracted_fields
-                        logger.info(f"Using first extraction result as metadata for file {file_name} ({file_id})")
-            
-            # If still no metadata values, use fallback metadata
+            # CRITICAL FIX: Validate metadata values
             if not metadata_values:
-                logger.warning(f"No metadata found for file {file_name} ({file_id}), using fallback metadata")
-                metadata_values = {
-                    "test_key": "test_value",
+                logger.error(f"No metadata found for file {file_name} ({file_id})")
+                return {
                     "file_id": file_id,
-                    "file_name": file_name
+                    "file_name": file_name,
+                    "success": False,
+                    "error": "No metadata found for this file"
                 }
             
             # Filter out placeholder values if requested
@@ -502,13 +309,14 @@ def apply_metadata_direct():
                 
                 metadata_values = filtered_metadata
             
-            # If no metadata values after filtering, use fallback
+            # If no metadata values after filtering, return error
             if not metadata_values:
-                logger.warning(f"No valid metadata found for file {file_name} ({file_id}) after filtering, using fallback")
-                metadata_values = {
-                    "test_key": "test_value",
+                logger.warning(f"No valid metadata found for file {file_name} ({file_id}) after filtering")
+                return {
                     "file_id": file_id,
-                    "file_name": file_name
+                    "file_name": file_name,
+                    "success": False,
+                    "error": "No valid metadata found after filtering placeholders"
                 }
             
             # Normalize keys if requested
