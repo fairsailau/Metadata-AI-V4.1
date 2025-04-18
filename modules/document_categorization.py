@@ -2,7 +2,8 @@ import streamlit as st
 import logging
 import json
 import requests
-from typing import Dict, Any, List, Optional
+import re
+from typing import Dict, Any, List, Optional, Tuple
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -94,7 +95,8 @@ def document_categorization():
                         "file_id": file_id,
                         "file_name": file_name,
                         "document_type": result["document_type"],
-                        "confidence": result["confidence"]
+                        "confidence": result["confidence"],
+                        "reasoning": result["reasoning"]
                     }
                 except Exception as e:
                     logger.error(f"Error categorizing document {file_name}: {str(e)}")
@@ -119,6 +121,18 @@ def document_categorization():
     # Display categorization results
     if st.session_state.document_categorization["is_categorized"]:
         st.write("### Categorization Results")
+        
+        # Create a table of results
+        results_data = []
+        for file_id, result in st.session_state.document_categorization["results"].items():
+            results_data.append({
+                "File Name": result["file_name"],
+                "Document Type": result["document_type"],
+                "Confidence": f"{result['confidence']:.2f}"
+            })
+        
+        if results_data:
+            st.table(results_data)
         
         # Display errors if any
         if st.session_state.document_categorization["errors"]:
@@ -171,14 +185,20 @@ def categorize_document(file_id: str, model: str = "azure__openai__gpt_4o_mini")
         "Other"
     ]
     
-    # Create prompt for document categorization - simplified for better results
-    prompt = f"Analyze this document and tell me which category it belongs to: {', '.join(document_types)}"
+    # Create prompt for document categorization with confidence score request
+    prompt = (
+        f"Analyze this document and determine which category it belongs to from the following options: "
+        f"{', '.join(document_types)}. "
+        f"Provide your answer in the following format:\n"
+        f"Category: [selected category]\n"
+        f"Confidence: [confidence score between 0 and 1, where 1 is highest confidence]\n"
+        f"Reasoning: [brief explanation of your categorization]"
+    )
     
     # Construct API URL for Box AI Ask
     api_url = "https://api.box.com/2.0/ai/ask"
     
     # Construct request body according to the API documentation
-    # Added the required 'mode' parameter
     request_body = {
         "mode": "single_item_qa",  # Required parameter - single_item_qa or multiple_item_qa
         "prompt": prompt,
@@ -216,17 +236,13 @@ def categorize_document(file_id: str, model: str = "azure__openai__gpt_4o_mini")
         if "answer" in response_data:
             answer_text = response_data["answer"]
             
-            # Try to find document type in answer
-            document_type = "Other"
-            for dt in document_types:
-                if dt.lower() in answer_text.lower():
-                    document_type = dt
-                    break
+            # Parse the structured response to extract category, confidence, and reasoning
+            document_type, confidence, reasoning = parse_categorization_response(answer_text, document_types)
             
             return {
                 "document_type": document_type,
-                "confidence": 0.8,
-                "reasoning": answer_text
+                "confidence": confidence,
+                "reasoning": reasoning
             }
         
         # If no answer in response, return default
@@ -239,3 +255,70 @@ def categorize_document(file_id: str, model: str = "azure__openai__gpt_4o_mini")
     except Exception as e:
         logger.error(f"Error in Box AI API call: {str(e)}")
         raise Exception(f"Error categorizing document: {str(e)}")
+
+def parse_categorization_response(response_text: str, document_types: List[str]) -> Tuple[str, float, str]:
+    """
+    Parse the AI response to extract document type, confidence score, and reasoning
+    
+    Args:
+        response_text: The AI response text
+        document_types: List of valid document types
+        
+    Returns:
+        tuple: (document_type, confidence, reasoning)
+    """
+    # Default values
+    document_type = "Other"
+    confidence = 0.5
+    reasoning = response_text
+    
+    try:
+        # Try to extract category using regex
+        category_match = re.search(r"Category:\s*([^\n]+)", response_text, re.IGNORECASE)
+        if category_match:
+            category_text = category_match.group(1).strip()
+            # Find the closest matching document type
+            for dt in document_types:
+                if dt.lower() in category_text.lower():
+                    document_type = dt
+                    break
+        
+        # Try to extract confidence using regex
+        confidence_match = re.search(r"Confidence:\s*(0\.\d+|1\.0|1)", response_text, re.IGNORECASE)
+        if confidence_match:
+            confidence = float(confidence_match.group(1))
+        else:
+            # If no explicit confidence, try to find confidence-related words
+            confidence_words = {
+                "very high": 0.9,
+                "high": 0.8,
+                "good": 0.7,
+                "moderate": 0.6,
+                "medium": 0.5,
+                "low": 0.4,
+                "very low": 0.3,
+                "uncertain": 0.2
+            }
+            
+            for word, value in confidence_words.items():
+                if word in response_text.lower():
+                    confidence = value
+                    break
+        
+        # Try to extract reasoning
+        reasoning_match = re.search(r"Reasoning:\s*([^\n]+(?:\n[^\n]+)*)", response_text, re.IGNORECASE)
+        if reasoning_match:
+            reasoning = reasoning_match.group(1).strip()
+        
+        # If no document type was found in the structured response, try to find it in the full text
+        if document_type == "Other":
+            for dt in document_types:
+                if dt.lower() in response_text.lower():
+                    document_type = dt
+                    break
+        
+        return document_type, confidence, reasoning
+    
+    except Exception as e:
+        logger.error(f"Error parsing categorization response: {str(e)}")
+        return document_type, confidence, reasoning

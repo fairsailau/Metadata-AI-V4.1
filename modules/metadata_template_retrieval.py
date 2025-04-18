@@ -1,7 +1,7 @@
 import streamlit as st
 import logging
+import requests
 import time
-import json
 from typing import Dict, Any, List, Optional
 
 # Configure logging
@@ -26,37 +26,37 @@ def get_metadata_templates(client, force_refresh=False):
         return st.session_state.metadata_templates
     
     try:
-        # Get enterprise ID
-        enterprise_id = None
-        user = client.user().get()
-        enterprise = user.enterprise
-        if enterprise:
-            enterprise_id = enterprise.id
+        # Get access token from client
+        access_token = None
+        if hasattr(client, '_oauth'):
+            access_token = client._oauth.access_token
+        elif hasattr(client, 'auth') and hasattr(client.auth, 'access_token'):
+            access_token = client.auth.access_token
         
-        if not enterprise_id:
-            logger.warning("Could not determine enterprise ID")
-            st.session_state.metadata_templates = {}
-            return {}
+        if not access_token:
+            raise ValueError("Could not retrieve access token from client")
         
-        # Get metadata templates
+        # Get metadata templates using direct API calls
         templates = {}
-        template_list = client.metadata_template().get_enterprise_templates()
         
-        for template in template_list:
-            template_key = template.templateKey
-            template_id = f"enterprise_{enterprise_id}_{template_key}"
-            
-            # Get template schema
-            template_schema = client.metadata_template(template_id).get()
-            
-            # Store template
-            templates[template_id] = {
-                "id": template_id,
-                "key": template_key,
-                "displayName": template_schema.displayName,
-                "fields": template_schema.fields,
-                "hidden": template_schema.hidden
-            }
+        # Retrieve enterprise templates
+        enterprise_templates = retrieve_templates_by_scope(access_token, "enterprise")
+        
+        # Process enterprise templates
+        for template in enterprise_templates:
+            if "templateKey" in template and "scope" in template:
+                template_key = template["templateKey"]
+                scope = template["scope"]
+                template_id = f"{scope}_{template_key}"
+                
+                # Store template
+                templates[template_id] = {
+                    "id": template_id,
+                    "key": template_key,
+                    "displayName": template.get("displayName", template_key),
+                    "fields": template.get("fields", []),
+                    "hidden": template.get("hidden", False)
+                }
         
         # Cache templates
         st.session_state.metadata_templates = templates
@@ -69,6 +69,59 @@ def get_metadata_templates(client, force_refresh=False):
         logger.error(f"Error retrieving metadata templates: {str(e)}")
         st.session_state.metadata_templates = {}
         return {}
+
+def retrieve_templates_by_scope(access_token, scope):
+    """
+    Retrieve metadata templates for a specific scope using direct API call
+    
+    Args:
+        access_token: Box API access token
+        scope: Template scope (enterprise or global)
+        
+    Returns:
+        list: List of metadata templates for the specified scope
+    """
+    templates = []
+    next_marker = None
+    
+    try:
+        # Make API calls until all templates are retrieved
+        while True:
+            # Construct API URL
+            api_url = f"https://api.box.com/2.0/metadata_templates/{scope}"
+            if next_marker:
+                api_url += f"?marker={next_marker}"
+            
+            # Set headers
+            headers = {
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            # Make API call
+            response = requests.get(api_url, headers=headers)
+            
+            # Check for errors
+            response.raise_for_status()
+            
+            # Parse response
+            data = response.json()
+            
+            # Add templates to list
+            if 'entries' in data:
+                templates.extend(data['entries'])
+            
+            # Check for next marker
+            if 'next_marker' in data and data['next_marker']:
+                next_marker = data['next_marker']
+            else:
+                break
+        
+        return templates
+    
+    except Exception as e:
+        logger.error(f"Error retrieving {scope} templates: {str(e)}")
+        return []
 
 def initialize_template_state():
     """

@@ -43,23 +43,24 @@ def extract_metadata_freeform(client, file_id, prompt=None, ai_model="azure__ope
         prompt = "Extract key metadata from this document including dates, names, amounts, and other important information."
     
     # Construct API URL for Box AI Extract
-    api_url = "https://api.box.com/2.0/ai/ask"
+    api_url = "https://api.box.com/2.0/ai/extract"
     
     # Construct request body
     request_body = {
-        "mode": "single_item_qa",
-        "prompt": prompt,
         "items": [
             {
-                "type": "file",
-                "id": file_id
+                "id": file_id,
+                "type": "file"
             }
         ],
+        "prompt": prompt,
         "ai_agent": {
-            "type": "ai_agent_ask",
+            "type": "ai_agent_extract",
+            "long_text": {
+                "model": ai_model
+            },
             "basic_text": {
-                "model": ai_model,
-                "mode": "default"
+                "model": ai_model
             }
         }
     }
@@ -77,26 +78,8 @@ def extract_metadata_freeform(client, file_id, prompt=None, ai_model="azure__ope
         # Parse response
         response_data = response.json()
         
-        # Extract answer from response
-        if "answer" in response_data:
-            answer_text = response_data["answer"]
-            
-            # Try to parse answer as JSON
-            try:
-                # Check if answer is already in JSON format
-                if answer_text.strip().startswith('{') and answer_text.strip().endswith('}'):
-                    metadata = json.loads(answer_text)
-                else:
-                    # Return as text
-                    metadata = {"extracted_text": answer_text}
-                
-                return metadata
-            except json.JSONDecodeError:
-                # Return as text
-                return {"extracted_text": answer_text}
-        
-        # If no answer in response, return empty result
-        return {"error": "No answer in response"}
+        # Return the response data
+        return response_data
     
     except Exception as e:
         logger.error(f"Error in Box AI API call: {str(e)}")
@@ -132,31 +115,60 @@ def extract_metadata_structured(client, file_id, template_id=None, custom_fields
         'Content-Type': 'application/json'
     }
     
-    # Construct API URL for Box AI Extract
-    api_url = "https://api.box.com/2.0/ai/extract/structured"
+    # Construct API URL for Box AI Extract Structured
+    api_url = "https://api.box.com/2.0/ai/extract_structured"
+    
+    # Create AI agent configuration
+    ai_agent = {
+        "type": "ai_agent_extract",
+        "long_text": {
+            "model": ai_model
+        },
+        "basic_text": {
+            "model": ai_model
+        }
+    }
+    
+    # Create items array with file ID
+    items = [{"id": file_id, "type": "file"}]
     
     # Construct request body
     request_body = {
-        "file": {
-            "type": "file",
-            "id": file_id
-        },
-        "ai_model": ai_model
+        "items": items,
+        "ai_agent": ai_agent
     }
     
     # Add template or custom fields
     if template_id:
-        request_body["template"] = {
-            "type": "metadata_template",
-            "id": template_id
-        }
+        # Get template details
+        template = get_template_by_id(template_id)
+        if template:
+            # Create metadata template reference
+            request_body["metadata_template"] = {
+                "templateKey": template["key"],
+                "scope": template_id.split("_")[0]  # Extract scope from template_id
+            }
+        else:
+            raise ValueError(f"Template with ID {template_id} not found")
     elif custom_fields:
-        request_body["fields"] = []
+        # Convert custom fields to Box API format
+        api_fields = []
         for field in custom_fields:
-            request_body["fields"].append({
-                "name": field["name"],
+            api_field = {
+                "key": field["name"],
+                "display_name": field["name"],
                 "type": field["type"]
-            })
+            }
+            
+            # Add options for enum fields
+            if field["type"] == "enum" and "options" in field:
+                api_field["options"] = field["options"]
+            
+            api_fields.append(api_field)
+        
+        request_body["fields"] = api_fields
+    else:
+        raise ValueError("Either template_id or custom_fields must be provided")
     
     try:
         # Make API call
@@ -171,14 +183,27 @@ def extract_metadata_structured(client, file_id, template_id=None, custom_fields
         # Parse response
         response_data = response.json()
         
-        # Extract metadata from response
-        if "metadata" in response_data:
-            metadata = response_data["metadata"]
-            return metadata
-        
-        # If no metadata in response, return empty result
-        return {"error": "No metadata in response"}
+        # Return the response data
+        return response_data
     
     except Exception as e:
         logger.error(f"Error in Box AI API call: {str(e)}")
         raise Exception(f"Error extracting metadata: {str(e)}")
+
+def get_template_by_id(template_id):
+    """
+    Get template by ID from session state
+    
+    Args:
+        template_id: Template ID
+        
+    Returns:
+        dict: Template or None if not found
+    """
+    if not template_id:
+        return None
+    
+    if not hasattr(st.session_state, "metadata_templates") or not st.session_state.metadata_templates:
+        return None
+    
+    return st.session_state.metadata_templates.get(template_id)
