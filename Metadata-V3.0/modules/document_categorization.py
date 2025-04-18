@@ -21,7 +21,7 @@ def document_categorization():
     
     if not st.session_state.selected_files:
         st.warning("No files selected. Please select files in the File Browser first.")
-        if st.button("Go to File Browser"):
+        if st.button("Go to File Browser", key="go_to_file_browser_button"):
             st.session_state.current_page = "File Browser"
             st.rerun()
         return
@@ -57,6 +57,7 @@ def document_categorization():
         "Select AI Model for Categorization",
         options=ai_models,
         index=0,
+        key="ai_model_select",
         help="Choose the AI model to use for document categorization"
     )
     
@@ -64,10 +65,10 @@ def document_categorization():
     col1, col2 = st.columns(2)
     
     with col1:
-        start_button = st.button("Start Categorization", use_container_width=True)
+        start_button = st.button("Start Categorization", key="start_categorization_button", use_container_width=True)
     
     with col2:
-        cancel_button = st.button("Cancel Categorization", use_container_width=True)
+        cancel_button = st.button("Cancel Categorization", key="cancel_categorization_button", use_container_width=True)
     
     # Process categorization
     if start_button:
@@ -119,19 +120,6 @@ def document_categorization():
     if st.session_state.document_categorization["is_categorized"]:
         st.write("### Categorization Results")
         
-        # Create a table of results
-        results_table = []
-        
-        for file_id, result in st.session_state.document_categorization["results"].items():
-            results_table.append({
-                "File Name": result["file_name"],
-                "Document Type": result["document_type"],
-                "Confidence": f"{result['confidence']:.2f}"
-            })
-        
-        if results_table:
-            st.table(results_table)
-        
         # Display errors if any
         if st.session_state.document_categorization["errors"]:
             st.write("### Errors")
@@ -141,7 +129,7 @@ def document_categorization():
         
         # Continue button
         st.write("---")
-        if st.button("Continue to Metadata Configuration", use_container_width=True):
+        if st.button("Continue to Metadata Configuration", key="continue_to_metadata_button", use_container_width=True):
             st.session_state.current_page = "Metadata Configuration"
             st.rerun()
 
@@ -183,21 +171,8 @@ def categorize_document(file_id: str, model: str = "azure__openai__gpt_4o_mini")
         "Other"
     ]
     
-    # Create prompt for document categorization
-    prompt = f"""Analyze this document and determine which of the following document types it belongs to:
-{', '.join(document_types)}
-
-Respond with a JSON object containing:
-1. document_type: The document type from the list above
-2. confidence: A number between 0 and 1 indicating your confidence in the classification
-3. reasoning: A brief explanation of why you classified it this way
-
-Example response:
-{{
-  "document_type": "Invoices",
-  "confidence": 0.95,
-  "reasoning": "The document contains invoice number, line items, prices, and payment terms."
-}}"""
+    # Create prompt for document categorization - simplified for better results
+    prompt = f"Analyze this document and tell me which category it belongs to: {', '.join(document_types)}"
     
     # Construct API URL for Box AI Ask
     api_url = "https://api.box.com/2.0/ai/ask"
@@ -228,9 +203,7 @@ Example response:
         logger.info(f"Box AI API response status: {response.status_code}")
         if response.status_code != 200:
             logger.error(f"Box AI API error response: {response.text}")
-        
-        # Check for errors
-        response.raise_for_status()
+            raise Exception(f"Error in Box AI API call: {response.status_code} Client Error: Bad Request for url: {api_url}")
         
         # Parse response
         response_data = response.json()
@@ -240,38 +213,18 @@ Example response:
         if "answer" in response_data:
             answer_text = response_data["answer"]
             
-            # Try to parse JSON from answer
-            try:
-                # First, check if the answer is already a JSON object
-                if isinstance(answer_text, dict):
-                    answer_json = answer_text
-                else:
-                    # Try to parse as JSON string
-                    answer_json = json.loads(answer_text)
-                
-                # Validate required fields
-                if "document_type" not in answer_json or "confidence" not in answer_json:
-                    # If missing fields, try to extract from text
-                    document_type = next((dt for dt in document_types if dt.lower() in str(answer_text).lower()), "Other")
-                    confidence = 0.5  # Default confidence
-                    
-                    return {
-                        "document_type": document_type,
-                        "confidence": confidence,
-                        "reasoning": "Extracted from text response"
-                    }
-                
-                return answer_json
-            except json.JSONDecodeError:
-                # If not valid JSON, try to extract from text
-                document_type = next((dt for dt in document_types if dt.lower() in str(answer_text).lower()), "Other")
-                confidence = 0.5  # Default confidence
-                
-                return {
-                    "document_type": document_type,
-                    "confidence": confidence,
-                    "reasoning": "Extracted from text response"
-                }
+            # Try to find document type in answer
+            document_type = "Other"
+            for dt in document_types:
+                if dt.lower() in answer_text.lower():
+                    document_type = dt
+                    break
+            
+            return {
+                "document_type": document_type,
+                "confidence": 0.8,
+                "reasoning": answer_text
+            }
         
         # If no answer in response, return default
         return {
