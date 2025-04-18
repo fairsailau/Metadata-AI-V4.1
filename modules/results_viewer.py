@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def view_results():
     """
-    View and manage extraction results
+    View and manage extraction results - COMPLETELY REDESIGNED TO AVOID NESTED EXPANDERS
     """
     st.title("View Results")
     
@@ -243,15 +243,39 @@ def view_results():
             st.info("No results match the current filter")
     
     with tab2:
-        # Detailed view
-        for file_id, result_data in filtered_results.items():
-            with st.expander(f"{result_data.get('file_name', 'Unknown')} ({file_id})", expanded=True):
+        # COMPLETELY REDESIGNED DETAILED VIEW TO AVOID NESTED EXPANDERS
+        # Instead of using expanders for each file, use a selectbox to choose which file to view
+        file_options = [(file_id, result_data.get("file_name", "Unknown")) 
+                        for file_id, result_data in filtered_results.items()]
+        
+        if not file_options:
+            st.info("No results match the current filter")
+        else:
+            # Add a "Select a file" option at the beginning
+            file_options = [("", "Select a file...")] + file_options
+            
+            # Create a selectbox for file selection
+            selected_file_id_name = st.selectbox(
+                "Select a file to view details",
+                options=file_options,
+                format_func=lambda x: x[1],  # Display the file name
+                key="file_selector"
+            )
+            
+            # Get the selected file ID
+            selected_file_id = selected_file_id_name[0] if selected_file_id_name[0] else None
+            
+            # Display file details if a file is selected
+            if selected_file_id and selected_file_id in filtered_results:
+                result_data = filtered_results[selected_file_id]
+                
                 # Display file info
+                st.write("### File Information")
                 st.write(f"**File:** {result_data.get('file_name', 'Unknown')}")
-                st.write(f"**File ID:** {file_id}")
+                st.write(f"**File ID:** {selected_file_id}")
                 
                 # Display extraction results
-                st.write("#### Extracted Metadata")
+                st.write("### Extracted Metadata")
                 
                 # Extract and display metadata
                 extracted_data = {}
@@ -266,16 +290,16 @@ def view_results():
                         
                         # Check for extracted_text field
                         if "extracted_text" in result_data["result_data"]:
-                            st.write("##### Extracted Text")
+                            st.write("#### Extracted Text")
                             st.write(result_data["result_data"]["extracted_text"])
                     elif isinstance(result_data["result_data"], str):
                         # If result_data is a string, display it as extracted text
-                        st.write("##### Extracted Text")
+                        st.write("#### Extracted Text")
                         st.write(result_data["result_data"])
                 
                 # Display extracted data as editable fields
                 if extracted_data:
-                    st.write("##### Key-Value Pairs")
+                    st.write("#### Key-Value Pairs")
                     for key, value in extracted_data.items():
                         # Create editable fields
                         if isinstance(value, list):
@@ -284,18 +308,18 @@ def view_results():
                                 key,
                                 options=value + ["Option 1", "Option 2", "Option 3"],
                                 default=value,
-                                key=f"edit_{file_id}_{key}"
+                                key=f"edit_{selected_file_id}_{key}"
                             )
                         else:
                             # For other field types
-                            new_value = st.text_input(key, value=str(value), key=f"edit_{file_id}_{key}")
+                            new_value = st.text_input(key, value=str(value), key=f"edit_{selected_file_id}_{key}")
                         
                         # Update value if changed
                         if new_value != value:
                             # Find the original result in extraction_results
-                            if file_id in st.session_state.extraction_results:
+                            if selected_file_id in st.session_state.extraction_results:
                                 # Get the original result
-                                original_result = st.session_state.extraction_results[file_id]
+                                original_result = st.session_state.extraction_results[selected_file_id]
                                 
                                 # Check if original result has answer field
                                 if isinstance(original_result, dict) and "answer" in original_result:
@@ -322,19 +346,28 @@ def view_results():
                 else:
                     st.write("No structured data extracted")
                 
-                # Display the raw JSON for debugging
-                with st.expander("Raw Result Data (Debug View)", expanded=False):
+                # CRITICAL FIX: Instead of using an expander for raw data, use a checkbox to toggle display
+                st.write("### Raw Result Data (Debug View)")
+                show_raw_data = st.checkbox("Show raw data", key=f"show_raw_{selected_file_id}")
+                
+                if show_raw_data:
                     if "original_data" in result_data:
                         st.json(result_data["original_data"])
                     else:
                         st.json(result_data)
                 
                 # Selection checkbox for batch operations
-                selected = st.checkbox("Select for batch operations", key=f"select_{file_id}")
-                if selected and file_id not in st.session_state.selected_result_ids:
-                    st.session_state.selected_result_ids.append(file_id)
-                elif not selected and file_id in st.session_state.selected_result_ids:
-                    st.session_state.selected_result_ids.remove(file_id)
+                st.write("### Batch Operations")
+                selected = st.checkbox(
+                    "Select for batch operations", 
+                    value=selected_file_id in st.session_state.selected_result_ids,
+                    key=f"select_{selected_file_id}"
+                )
+                
+                if selected and selected_file_id not in st.session_state.selected_result_ids:
+                    st.session_state.selected_result_ids.append(selected_file_id)
+                elif not selected and selected_file_id in st.session_state.selected_result_ids:
+                    st.session_state.selected_result_ids.remove(selected_file_id)
     
     # Batch operations
     st.subheader("Batch Operations")
