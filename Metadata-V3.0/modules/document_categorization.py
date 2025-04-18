@@ -38,6 +38,28 @@ def document_categorization():
     num_files = len(st.session_state.selected_files)
     st.write(f"Ready to categorize {num_files} files using Box AI.")
     
+    # AI Model selection
+    ai_models = [
+        "azure__openai__gpt_4o_mini",
+        "azure__openai__gpt_4o_2024_05_13",
+        "google__gemini_2_0_flash_001",
+        "google__gemini_2_0_flash_lite_preview",
+        "google__gemini_1_5_flash_001",
+        "google__gemini_1_5_pro_001",
+        "aws__claude_3_haiku",
+        "aws__claude_3_sonnet",
+        "aws__claude_3_5_sonnet",
+        "aws__claude_3_7_sonnet",
+        "aws__titan_text_lite"
+    ]
+    
+    selected_model = st.selectbox(
+        "Select AI Model for Categorization",
+        options=ai_models,
+        index=0,
+        help="Choose the AI model to use for document categorization"
+    )
+    
     # Categorization controls
     col1, col2 = st.columns(2)
     
@@ -64,7 +86,7 @@ def document_categorization():
                 
                 try:
                     # Categorize document
-                    result = categorize_document(file_id)
+                    result = categorize_document(file_id, selected_model)
                     
                     # Store result
                     st.session_state.document_categorization["results"][file_id] = {
@@ -123,12 +145,13 @@ def document_categorization():
             st.session_state.current_page = "Metadata Configuration"
             st.rerun()
 
-def categorize_document(file_id: str) -> Dict[str, Any]:
+def categorize_document(file_id: str, model: str = "azure__openai__gpt_4o_mini") -> Dict[str, Any]:
     """
     Categorize a document using Box AI
     
     Args:
         file_id: Box file ID
+        model: AI model to use for categorization
         
     Returns:
         dict: Document categorization result
@@ -179,25 +202,39 @@ Example response:
     # Construct API URL for Box AI Ask
     api_url = "https://api.box.com/2.0/ai/ask"
     
-    # Construct request body
+    # Construct request body according to the API documentation
     request_body = {
-        "item": {
-            "type": "file",
-            "id": file_id
-        },
         "prompt": prompt,
-        "model": "azure__openai__gpt_4o_mini"  # Use a default model
+        "items": [
+            {
+                "type": "file",
+                "id": file_id
+            }
+        ],
+        "ai_agent": {
+            "type": "ai_agent_ask",
+            "basic_text": {
+                "model": model
+            }
+        }
     }
     
     try:
         # Make API call
+        logger.info(f"Making Box AI API call with request: {json.dumps(request_body)}")
         response = requests.post(api_url, headers=headers, json=request_body)
+        
+        # Log response for debugging
+        logger.info(f"Box AI API response status: {response.status_code}")
+        if response.status_code != 200:
+            logger.error(f"Box AI API error response: {response.text}")
         
         # Check for errors
         response.raise_for_status()
         
         # Parse response
         response_data = response.json()
+        logger.info(f"Box AI API response data: {json.dumps(response_data)}")
         
         # Extract answer from response
         if "answer" in response_data:
@@ -205,12 +242,17 @@ Example response:
             
             # Try to parse JSON from answer
             try:
-                answer_json = json.loads(answer_text)
+                # First, check if the answer is already a JSON object
+                if isinstance(answer_text, dict):
+                    answer_json = answer_text
+                else:
+                    # Try to parse as JSON string
+                    answer_json = json.loads(answer_text)
                 
                 # Validate required fields
                 if "document_type" not in answer_json or "confidence" not in answer_json:
                     # If missing fields, try to extract from text
-                    document_type = next((dt for dt in document_types if dt.lower() in answer_text.lower()), "Other")
+                    document_type = next((dt for dt in document_types if dt.lower() in str(answer_text).lower()), "Other")
                     confidence = 0.5  # Default confidence
                     
                     return {
@@ -222,7 +264,7 @@ Example response:
                 return answer_json
             except json.JSONDecodeError:
                 # If not valid JSON, try to extract from text
-                document_type = next((dt for dt in document_types if dt.lower() in answer_text.lower()), "Other")
+                document_type = next((dt for dt in document_types if dt.lower() in str(answer_text).lower()), "Other")
                 confidence = 0.5  # Default confidence
                 
                 return {
