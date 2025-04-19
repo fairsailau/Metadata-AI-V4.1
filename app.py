@@ -276,8 +276,8 @@ else:
     elif st.session_state.current_page == "Process Files":
         process_files()
     
-    elif st.session_state.current_page == "View Results":
+    elif st.session_state.current_page == "apply_metadata_direct & view_results":
         view_results()
     
-    elif st.session_state.current_page == "Apply Metadata":
+    elif st.session_state.current_page == "apply_metadata_direct & view_results":
         apply_metadata()
