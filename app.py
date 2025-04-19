@@ -27,8 +27,8 @@ from modules.authentication import authenticate
 from modules.file_browser import file_browser
 from modules.metadata_config import metadata_config
 from modules.processing import process_files
-from modules.apply_metadata_direct & view_results import view_results
-from modules.apply_metadata_direct & view_results import apply_metadata_direct as apply_metadata
+from modules.apply_metadata_direct_view_results import view_results
+from modules.apply_metadata_direct_view_results import apply_metadata_direct as apply_metadata
 from modules.document_categorization import document_categorization
 from modules.metadata_template_retrieval import get_metadata_templates, initialize_template_state
 
@@ -276,8 +276,8 @@ else:
     elif st.session_state.current_page == "Process Files":
         process_files()
     
-    elif st.session_state.current_page == "apply_metadata_direct & view_results":
+    elif st.session_state.current_page == "apply_metadata_direct_view_results":
         view_results()
     
-    elif st.session_state.current_page == "apply_metadata_direct & view_results":
+    elif st.session_state.current_page == "apply_metadata_direct_view_results":
         apply_metadata()
