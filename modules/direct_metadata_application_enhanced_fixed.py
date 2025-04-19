@@ -2,7 +2,6 @@ import streamlit as st
 import logging
 import json
 from boxsdk import Client
-from .enhanced_logging import log_full_exception, log_metadata_operation
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -97,28 +96,22 @@ def apply_metadata_direct():
                 file_id_to_file_name[file_id] = file_name
                 logger.info(f"Added file ID {file_id} from selected_files")
     
-    # Process each file ID in processing_state
-    for key in processing_state.keys():
-        # CRITICAL FIX: Ensure key is a string
-        file_id = str(key)
-        logger.info(f"Processing file ID: {file_id} from processing_state")
-        
-        # Get the result for this file ID
-        result = processing_state.get(file_id, {})
-        
-        # Add to available file IDs if not already there
-        if file_id not in available_file_ids:
-            available_file_ids.append(file_id)
-        
-        # Extract file name if available
-        if "file_name" in result:
-            file_id_to_file_name[file_id] = result["file_name"]
-        
-        # CRITICAL FIX: Extract metadata from the correct location in processing_state
-        # Try multiple approaches to find metadata
-        metadata_found = False
-        
-        # Approach 1: Check for 'results' key (most common in v4.1)
+    # grab just the real extraction results
+    results_map = processing_state.get("results", {})
+    logger.info(f"Results map keys: {list(results_map.keys())}")
+    for raw_id, result in results_map.items():
+        file_id = str(raw_id)
+        available_file_ids.append(file_id)
+        # if you stored names earlier
+        file_id_to_file_name.setdefault(file_id, f"File {file_id}")
+        # Now pick your extracted data out of `result`
+        if isinstance(result, dict) and result.get("results"):
+            metadata = result["results"]
+        else:
+            # fallback to the entire dict if you want
+            metadata = result
+        file_id_to_metadata[file_id] = metadata
+        logger.info(f"Extracted metadata for {file_id}: {metadata!r}")
         if "results" in result and result["results"]:
             metadata_values = result["results"]
             if metadata_values:
@@ -342,8 +335,6 @@ def apply_metadata_direct():
         return any(indicator in value_lower for indicator in placeholder_indicators)
     
     # Direct function to apply metadata to a single file
-    @log_full_exception
-    @log_metadata_operation("apply_metadata_to_file")
     def apply_metadata_to_file_direct(client, file_id, metadata_values):
         """
         Apply metadata to a single file with direct client reference
