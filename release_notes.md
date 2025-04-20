@@ -1,14 +1,14 @@
-# Release Notes - Box Metadata AI V4.1 Fixed V6
+# Release Notes - Box Metadata AI V4.1 Fixed V5
 
 ## Overview
-This release addresses critical issues with structured metadata extraction in the Box Metadata AI application and implements the correct API format according to Box API specifications.
+This release addresses critical issues with structured metadata extraction in the Box Metadata AI application and fixes Streamlit compatibility issues with older versions.
 
 ## Fixed Issues
 
 ### 1. Structured Metadata Extraction
-- **Root Cause Identified**: The application was using an incorrect value for `ai_agent.type` in API requests
-- **Solution Implemented**: Updated the `ai_agent.type` value to `"ai_agent_extract_structured"` (from `"ai_agent_extract"`)
-- **Benefits**: Eliminates 400 Bad Request errors by using the correct API format
+- **Root Cause Identified**: The application was sending an invalid `ai_agent.type` value in API requests
+- **Solution Implemented**: Completely removed the `ai_agent` field from structured metadata extraction requests, allowing Box to use the default agent
+- **Benefits**: Eliminates 400 Bad Request errors by simplifying the API request format
 
 ### 2. Streamlit Compatibility
 - **Root Cause Identified**: The `label_visibility` parameter is not supported in older Streamlit versions
@@ -22,10 +22,9 @@ This release addresses critical issues with structured metadata extraction in th
 ## Technical Improvements
 
 ### API Request Format
-- Used correct `ai_agent.type` value (`"ai_agent_extract_structured"`) for structured metadata extraction
+- Simplified API requests by removing unnecessary fields
 - Used correct property names (`template_key` instead of `templateKey`)
 - Ensured all required type fields are included in metadata templates
-- Added conditional logic to only include the `ai_agent` field when needed
 
 ### Code Quality
 - Enhanced error handling and logging
@@ -44,7 +43,6 @@ streamlit run app.py
 - Box SDK 3.0+
 - Internet connection for Box API access
 
-## Documentation
-- Included detailed API documentation with correct request formats
-- Added test plan with example API requests
-- Provided best practices for Box AI API usage
+## Known Issues
+- Processing very large batches (100+ files) may encounter API rate limits
+- Some document types may require additional training for optimal categorization
