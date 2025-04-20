@@ -1,15 +1,21 @@
-# Release Notes - Box Metadata AI V4.1 Fixed V2
+# Release Notes - Box Metadata AI V4.1 Fixed V3
 
 ## Overview
-This release fixes critical issues with structured metadata extraction and session management in the Box Metadata AI application, while preserving all the enhanced features from the previous version.
+This release addresses critical issues with structured metadata extraction in the Box Metadata AI application, enhances the UI with additional navigation options, and preserves all the enhanced features from previous versions.
 
 ## Fixed Issues
 
 ### Structured Metadata Extraction
 - Fixed API request format for structured metadata extraction
-- Added required "type" field to metadata template reference
-- Corrected AI agent configuration to match Box API requirements
-- Improved error handling for template-based extraction
+- Corrected `ai_agent.type` value to "extract" instead of "ai_agent_extract"
+- Updated metadata template format to use `template_key` instead of `templateKey`
+- Ensured all fields have non-empty `displayName` values to address accessibility warnings
+- Applied fixes to both structured and freeform metadata extraction functions
+
+### UI Enhancements
+- Added "Continue to Document Categorization" button in the File Browser page
+- Maintained all visual enhancements from previous versions
+- Preserved user journey guide and workflow visualization
 
 ### Session Management
 - Enhanced session timeout handling with configurable timeout duration
@@ -17,29 +23,11 @@ This release fixes critical issues with structured metadata extraction and sessi
 - Implemented session timeout warnings and automatic logout
 - Added session time remaining indicator in the sidebar
 
-### Visual Enhancements
-- Restored all visual enhancements from the previous version
-- Ensured user journey guide displays correctly
-- Maintained workflow visualization on the home page
-- Preserved UI settings functionality
-
-## Existing Features
-
-### Batch Processing for Document Categorization
-- Support for processing multiple files simultaneously
-- Configurable batch size (1-100 files)
-- Real-time progress tracking with detailed status updates
-- Error handling and retry mechanisms for improved reliability
-
-### Policies Document Type
-- "Policies" document type option
-- Enhanced categorization to identify policy documents
-- Updated parsing logic to handle the new document type
-
-### Folder Selection
-- Ability to select entire folders for processing
-- Support for recursive file retrieval from subfolders
-- Enhanced UI for managing folder selections
+## Documentation
+- Added comprehensive API documentation for structured metadata extraction
+- Included test cases and results for verification
+- Documented common errors and their solutions
+- Provided best practices for API usage
 
 ## Installation
 Simply extract the zip file and run the application using Streamlit:
