@@ -7,7 +7,7 @@
 POST https://api.box.com/2.0/ai/extract_structured
 ```
 
-### Request Format - SIMPLIFIED APPROACH
+### Request Format - CORRECT APPROACH
 ```json
 {
   "items": [
@@ -20,6 +20,12 @@ POST https://api.box.com/2.0/ai/extract_structured
     "template_key": "template_key",
     "scope": "enterprise",
     "type": "metadata_template"
+  },
+  "ai_agent": {
+    "type": "ai_agent_extract_structured",
+    "basic_text": {
+      "model": "google__gemini_2_0_flash_001"
+    }
   }
 }
 ```
@@ -35,6 +41,10 @@ POST https://api.box.com/2.0/ai/extract_structured
 - `metadata_template.template_key`: The template key (not `templateKey`)
 - `metadata_template.scope`: Usually `"enterprise"` or `"global"`
 - `metadata_template.type`: Must be set to `"metadata_template"`
+
+#### AI Agent (Optional)
+- `ai_agent.type`: Must be set to `"ai_agent_extract_structured"` for structured extraction
+- `ai_agent.basic_text.model`: AI model to use (e.g., "google__gemini_2_0_flash_001")
 
 #### Custom Fields (Alternative to metadata_template)
 ```json
@@ -52,17 +62,21 @@ POST https://api.box.com/2.0/ai/extract_structured
       "type": "string",
       "description": "Field description"
     }
-  ]
+  ],
+  "ai_agent": {
+    "type": "ai_agent_extract_structured",
+    "basic_text": {
+      "model": "google__gemini_2_0_flash_001"
+    }
+  }
 }
 ```
 
-- Each field must have a non-empty `displayName`
-- Supported field types: `"string"`, `"enum"`, `"date"`, `"number"`, etc.
-
 ### Important Notes
-- **DO NOT include the `ai_agent` field** - Box will use the default agent
-- If you must override the AI agent, consult Box API documentation for exact format
+- If you don't need to override the AI model, you can omit the `ai_agent` field entirely
+- When including `ai_agent`, the `type` must be exactly `"ai_agent_extract_structured"` for structured extraction
 - Always include the required `type: "metadata_template"` field in template references
+- Each field must have a non-empty `displayName`
 
 ## Freeform Metadata Extraction
 
@@ -71,7 +85,7 @@ POST https://api.box.com/2.0/ai/extract_structured
 POST https://api.box.com/2.0/ai/extract
 ```
 
-### Request Format - SIMPLIFIED APPROACH
+### Request Format
 ```json
 {
   "items": [
@@ -80,13 +94,19 @@ POST https://api.box.com/2.0/ai/extract
       "type": "file"
     }
   ],
-  "prompt": "Extract key metadata from this document"
+  "prompt": "Extract key metadata from this document",
+  "ai_agent": {
+    "type": "ai_agent_extract",
+    "basic_text": {
+      "model": "google__gemini_2_0_flash_001"
+    }
+  }
 }
 ```
 
 ### Key Parameters
 - `prompt`: The extraction prompt for the AI model
-- **DO NOT include the `ai_agent` field** unless absolutely necessary
+- `ai_agent.type`: Must be set to `"ai_agent_extract"` for freeform extraction
 
 ## Common Errors and Solutions
 
@@ -109,19 +129,14 @@ POST https://api.box.com/2.0/ai/extract
 }
 ```
 
-**Solution**: Remove the `ai_agent` field entirely from your request.
-
-### Accessibility Warning - Empty Label
-```
-`label` got an empty value. This is discouraged for accessibility reasons
-```
-
-**Solution**: Ensure all UI elements have a non-empty label and use `label_visibility="collapsed"` if you want to hide it.
+**Solution**: Use the correct `ai_agent.type` value:
+- For structured extraction: `"ai_agent_extract_structured"`
+- For freeform extraction: `"ai_agent_extract"`
 
 ## Best Practices
 
-1. **Use minimal request format** - Only include required fields
-2. **Let Box choose the default AI agent** - Don't override unless necessary
+1. **Use correct type values** - Each endpoint requires a specific `ai_agent.type` value
+2. **Consider omitting ai_agent** - If you don't need to override the default model
 3. **Always include required type fields** in metadata templates
 4. **Use correct property names** (`template_key` not `templateKey`)
 5. **Provide non-empty labels** for all UI elements
