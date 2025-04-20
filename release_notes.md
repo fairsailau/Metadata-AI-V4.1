@@ -1,19 +1,19 @@
-# Release Notes - Box Metadata AI V4.1 Fixed V4
+# Release Notes - Box Metadata AI V4.1 Fixed V5
 
 ## Overview
-This release addresses critical issues with structured metadata extraction in the Box Metadata AI application, fixes UI accessibility warnings, and preserves all the enhanced features from previous versions.
+This release addresses critical issues with structured metadata extraction in the Box Metadata AI application and fixes Streamlit compatibility issues with older versions.
 
 ## Fixed Issues
 
 ### 1. Structured Metadata Extraction
-- **Root Cause Identified**: The application was sending an invalid `ai_agent.type` value of "ai_agent_extract" in API requests
+- **Root Cause Identified**: The application was sending an invalid `ai_agent.type` value in API requests
 - **Solution Implemented**: Completely removed the `ai_agent` field from structured metadata extraction requests, allowing Box to use the default agent
 - **Benefits**: Eliminates 400 Bad Request errors by simplifying the API request format
 
-### 2. UI Accessibility Warnings
-- **Root Cause Identified**: Many UI elements had empty labels, triggering accessibility warnings
-- **Solution Implemented**: Added proper non-empty labels with `label_visibility="collapsed"` where needed
-- **Benefits**: Eliminates "label got an empty value" warnings while maintaining the same visual appearance
+### 2. Streamlit Compatibility
+- **Root Cause Identified**: The `label_visibility` parameter is not supported in older Streamlit versions
+- **Solution Implemented**: Removed all `label_visibility` parameters from UI components
+- **Benefits**: Ensures compatibility with all Streamlit versions while maintaining functionality
 
 ### 3. Document Categorization Navigation
 - Maintained the "Continue to Document Categorization" button in the File Browser page
@@ -29,12 +29,7 @@ This release addresses critical issues with structured metadata extraction in th
 ### Code Quality
 - Enhanced error handling and logging
 - Improved code organization and readability
-- Added comprehensive documentation and test plans
-
-## Documentation
-- Added detailed API documentation with precise requirements
-- Included test plan with exact API specifications
-- Documented best practices for Box AI API integration
+- Added comprehensive documentation
 
 ## Installation
 Simply extract the zip file and run the application using Streamlit:
@@ -44,7 +39,7 @@ streamlit run app.py
 
 ## Requirements
 - Python 3.7+
-- Streamlit 1.10+
+- Streamlit (any version)
 - Box SDK 3.0+
 - Internet connection for Box API access
 
