@@ -1,33 +1,40 @@
-# Release Notes - Box Metadata AI V4.1 Fixed V3
+# Release Notes - Box Metadata AI V4.1 Fixed V4
 
 ## Overview
-This release addresses critical issues with structured metadata extraction in the Box Metadata AI application, enhances the UI with additional navigation options, and preserves all the enhanced features from previous versions.
+This release addresses critical issues with structured metadata extraction in the Box Metadata AI application, fixes UI accessibility warnings, and preserves all the enhanced features from previous versions.
 
 ## Fixed Issues
 
-### Structured Metadata Extraction
-- Fixed API request format for structured metadata extraction
-- Corrected `ai_agent.type` value to "extract" instead of "ai_agent_extract"
-- Updated metadata template format to use `template_key` instead of `templateKey`
-- Ensured all fields have non-empty `displayName` values to address accessibility warnings
-- Applied fixes to both structured and freeform metadata extraction functions
+### 1. Structured Metadata Extraction
+- **Root Cause Identified**: The application was sending an invalid `ai_agent.type` value of "ai_agent_extract" in API requests
+- **Solution Implemented**: Completely removed the `ai_agent` field from structured metadata extraction requests, allowing Box to use the default agent
+- **Benefits**: Eliminates 400 Bad Request errors by simplifying the API request format
 
-### UI Enhancements
-- Added "Continue to Document Categorization" button in the File Browser page
-- Maintained all visual enhancements from previous versions
-- Preserved user journey guide and workflow visualization
+### 2. UI Accessibility Warnings
+- **Root Cause Identified**: Many UI elements had empty labels, triggering accessibility warnings
+- **Solution Implemented**: Added proper non-empty labels with `label_visibility="collapsed"` where needed
+- **Benefits**: Eliminates "label got an empty value" warnings while maintaining the same visual appearance
 
-### Session Management
-- Enhanced session timeout handling with configurable timeout duration
-- Added activity tracking to prevent premature session expiration
-- Implemented session timeout warnings and automatic logout
-- Added session time remaining indicator in the sidebar
+### 3. Document Categorization Navigation
+- Maintained the "Continue to Document Categorization" button in the File Browser page
+- Ensured proper navigation flow between file selection and document categorization
+
+## Technical Improvements
+
+### API Request Format
+- Simplified API requests by removing unnecessary fields
+- Used correct property names (`template_key` instead of `templateKey`)
+- Ensured all required type fields are included in metadata templates
+
+### Code Quality
+- Enhanced error handling and logging
+- Improved code organization and readability
+- Added comprehensive documentation and test plans
 
 ## Documentation
-- Added comprehensive API documentation for structured metadata extraction
-- Included test cases and results for verification
-- Documented common errors and their solutions
-- Provided best practices for API usage
+- Added detailed API documentation with precise requirements
+- Included test plan with exact API specifications
+- Documented best practices for Box AI API integration
 
 ## Installation
 Simply extract the zip file and run the application using Streamlit:
