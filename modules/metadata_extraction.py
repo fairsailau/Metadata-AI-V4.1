@@ -52,7 +52,7 @@ def metadata_extraction():
             
             # Create AI agent configuration
             ai_agent = {
-                "type": "ai_agent_extract",
+                "type": "ai_agent_extract_structured",
                 "long_text": {
                     "model": ai_model
                 },
